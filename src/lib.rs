@@ -120,6 +120,8 @@ fn mergesort(mut data: &mut [usize], mut buffer: &mut [usize]) {
         if steal_counter > 0 && data.len() > 1000 {
             // If there's more steals than threads, just create tasks for all *other* threads
             let steal_counter = std::cmp::min(steal_counter, NUM_THREADS - 1);
+            let chunks_ptr = data.as_mut_ptr();
+            let chunks_len = data.len();
             let chunks = data
                 .chunks_mut(data.len() / (steal_counter + 1) + 1)
                 .peekable();
@@ -155,11 +157,13 @@ fn mergesort(mut data: &mut [usize], mut buffer: &mut [usize]) {
             }
             let index = pieces.iter().map(|x| x.len()).sum();
             let (lb, rb) = buffer.split_at_mut(index);
-            // buffer = lb;
             spawn(chunks, rb);
+            let chunks_data = unsafe { std::slice::from_raw_parts_mut(chunks_ptr, chunks_len) };
+            assert!(chunks_data.windows(2).all(|w| w[0] >= w[1]));
             merge(pieces, lb);
+            assert!(lb.windows(2).all(|w| w[0] >= w[1]));
             let x = unsafe { std::slice::from_raw_parts_mut(orig, orig_size) };
-            merge(vec![rb, lb], x);
+            merge(vec![chunks_data, lb], x);
             return;
         }
 
