@@ -10,7 +10,7 @@ use std::option::Option;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use itertools::Itertools;
-pub const NUM_THREADS: usize = 2;
+pub const NUM_THREADS: usize = 4;
 lazy_static! {
     static ref V: Vec<CachePadded<AtomicUsize>> = (0..NUM_THREADS)
         .map(|_| CachePadded::new(AtomicUsize::new(0)))
@@ -68,25 +68,17 @@ impl Ord for Index<'_> {
 }
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut v1: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(10000)
+    let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
+        .take(100000)
         .map(|x: usize| x % 1_000)
         .collect();
 
     // v1.sort();
     // v1.reverse();
 
-    // let mut v2: Vec<usize> = std::iter::repeat_with(rand::random)
-    //     .take(200000)
-    //     .map(|x: usize| x % 1_000_000)
-    //     .collect();
-    // v2.sort();
-    // v2.reverse();
-    let checksum: usize = v1.iter().sum();
-    // let checksum: usize = checksum + v2.iter().sum::<usize>();
 
-    let mut buffer = &mut Vec::with_capacity(v1.len());
-    buffer.resize(buffer.capacity(), 0);
+    let checksum: usize = v.iter().sum();
+    // let checksum: usize = checksum + v2.iter().sum::<usize>();
 
     let pool = rayon_logs::ThreadPoolBuilder::new()
         .num_threads(NUM_THREADS)
@@ -97,20 +89,29 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     v.push(&v1);
     v.push(&v2);
     */
-    let (_, log) = pool.logging_install(|| mergesort(&mut v1, &mut buffer));
+    let (_, log) = pool.logging_install(|| mergesort(&mut v));
     log.save_svg("test.svg").expect("failed saving svg");
 
-    assert_eq!(checksum, buffer.iter().sum::<usize>(), "failed merging");
-    println!("{:?}", v1);
-    assert!(buffer.windows(2).all(|w| w[0] >= w[1]));
+    assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
+    assert!(v.windows(2).all(|w| w[0] >= w[1]));
 
     Ok(())
 }
+fn mergesort(data: &mut[usize]) {
+    let mut tmp_slice1 : Vec<usize>= Vec::with_capacity(data.len());
+    let mut tmp_slice2 : Vec<usize> = Vec::with_capacity(data.len());
+    unsafe {
+        tmp_slice1.set_len(data.len());
+        tmp_slice2.set_len(data.len());
+    }
+    mergesort1(data, &mut tmp_slice1, &mut tmp_slice2);
+    tmp_slice1.iter().zip(data).for_each(|(t,b)| *b = *t);
 
-fn mergesort(mut data: &mut [usize], mut buffer: &mut [usize]) {
-    let orig = data.as_mut_ptr();
-    let orig_size = data.len();
-    assert_eq!(data.len(), buffer.len());
+}
+
+fn mergesort1(mut data: &mut [usize], mut to: &mut [usize], mut temp: &mut [usize]) {
+    assert_eq!(data.len(), to.len());
+    assert_eq!(data.len(), temp.len());
     let thread_index = rayon::current_thread_index().unwrap();
     let mut pieces: Vec<&[usize]> = Vec::new();
 
@@ -120,15 +121,14 @@ fn mergesort(mut data: &mut [usize], mut buffer: &mut [usize]) {
         if steal_counter > 0 && data.len() > 1000 {
             // If there's more steals than threads, just create tasks for all *other* threads
             let steal_counter = std::cmp::min(steal_counter, NUM_THREADS - 1);
-            let chunks_ptr = data.as_mut_ptr();
-            let chunks_len = data.len();
             let chunks = data
                 .chunks_mut(data.len() / (steal_counter + 1) + 1)
                 .peekable();
             println!("{} is Splitting in {} chunks", thread_index, chunks.len());
             fn spawn(
                 mut chunks: std::iter::Peekable<std::slice::ChunksMut<usize>>,
-                buffer: &mut [usize],
+                to: &mut [usize],
+                temp: &mut [usize],
             ) {
                 let chunk = chunks.next().unwrap();
                 match chunks.peek() {
@@ -136,37 +136,47 @@ fn mergesort(mut data: &mut [usize], mut buffer: &mut [usize]) {
                         // finished recursion, let's do our part of the data
                         let thread_index = rayon::current_thread_index().unwrap();
                         println!("{}: mergesort({})", thread_index, chunk.len());
-                        assert_eq!(chunk.len(), buffer.len());
-                        mergesort(chunk, buffer);
+                        assert_eq!(chunk.len(), to.len());
+                        mergesort1(chunk, to, temp);
                     }
                     Some(_) => {
-                        let (lb, rb) = buffer.split_at_mut(chunk.len());
+                        let (left_to, right_to) = to.split_at_mut(chunk.len());
+                        let (left_temp, right_temp) = temp.split_at_mut(chunk.len());
                         rayon_logs::join(
                             || {
                                 // prepare another task for the next stealer
-                                spawn(chunks, rb);
+                                spawn(chunks, right_to, right_temp);
                             },
                             || {
                                 // let the stealer process it's part
-                                assert_eq!(chunk.len(), lb.len());
-                                mergesort(chunk, lb);
+                                assert_eq!(chunk.len(), left_to.len());
+                                assert_eq!(chunk.len(), left_temp.len());
+                        let thread_index = rayon::current_thread_index().unwrap();
+                                println!("{}: mergesort({})", thread_index, chunk.len());
+                                mergesort1(chunk, left_to, left_temp);
                             },
                         );
                     }
                 };
             }
-            let index = pieces.iter().map(|x| x.len()).sum();
-            let (lb, rb) = buffer.split_at_mut(index);
-            spawn(chunks, rb);
-            let chunks_data = unsafe { std::slice::from_raw_parts_mut(chunks_ptr, chunks_len) };
-            assert!(chunks_data.windows(2).all(|w| w[0] >= w[1]));
-            merge(pieces, lb);
-            assert!(lb.windows(2).all(|w| w[0] >= w[1]));
-            let x = unsafe { std::slice::from_raw_parts_mut(orig, orig_size) };
-            merge(vec![chunks_data, lb], x);
+            // Split my data in the part I've already sorted and the rest (which you give to other
+            // threads)
+            let index = pieces.iter().map(|x| x.len()).sum(); // how many items we have sorted
+            let (lto, rto) = to.split_at_mut(index);
+            let (ltemp, rtemp) = temp.split_at_mut(index);
+
+            spawn(chunks, rtemp, rto);
+            // we need to merge all those chunks now
+            let chunks = rtemp 
+                .chunks_mut(data.len() / (steal_counter + 1) + 1)
+                .peekable();
+            chunks.for_each(|x| pieces.push(x));
+    assert!(pieces.iter().all(|x| x.windows(2).all(|w| w[0] >= w[1])));
+            merge(pieces, to);
+            assert!(to.windows(2).all(|w| w[0] >= w[1]));
             return;
         }
-
+        // Sort a piece
         let (left, right) = data.split_at_mut(std::cmp::min(data.len(), MIN_WORK_SIZE));
         data = right;
         left.sort();
@@ -174,7 +184,8 @@ fn mergesort(mut data: &mut [usize], mut buffer: &mut [usize]) {
         pieces.push(&*left);
     }
     println!("{} is merging", thread_index);
-    merge(pieces, buffer);
+    merge(pieces, to);
+    assert!(to.windows(2).all(|w| w[0] >= w[1]));
     println!("{} is finished merging", thread_index);
     //data.iter_mut().zip(buffer).for_each(|(d, b)| *d = *b);
 }
@@ -182,6 +193,7 @@ fn mergesort(mut data: &mut [usize], mut buffer: &mut [usize]) {
 const MIN_WORK_SIZE: usize = 100;
 fn merge(slices: Vec<&[usize]>, buffer: &mut [usize]) {
     assert_eq!(slices.iter().map(|x| x.len()).sum::<usize>(), buffer.len());
+    assert!(slices.iter().all(|x| x.windows(2).all(|w| w[0] >= w[1])));
     let mut heap: BinaryHeap<Index> = BinaryHeap::new();
     slices.iter().for_each(|slice| {
         heap.push(Index {
@@ -258,6 +270,7 @@ fn merge(slices: Vec<&[usize]>, buffer: &mut [usize]) {
                         buffer.len()
                     );
                     merge(slices, buffer);
+                    assert!(buffer.windows(2).all(|w| w[0] >= w[1]));
                     return;
                 }
                 let split = max_slice.len() / steal_counter;
