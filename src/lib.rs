@@ -5,6 +5,7 @@ use crossbeam::CachePadded;
 use crossbeam_utils as crossbeam;
 use itertools::kmerge;
 use rayon_logs as rayon;
+use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::option::Option;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -56,7 +57,6 @@ impl Index<'_> {
 impl PartialOrd for Index<'_> {
     fn partial_cmp(self: &Self, other: &Index) -> Option<std::cmp::Ordering> {
         // We turn aronud the binary heap to get minimum comparisions
-        //other.get().partial_cmp(&self.get())
         self.get().partial_cmp(&other.get())
     }
 }
@@ -75,7 +75,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // v1.sort();
     // v1.reverse();
-
 
     let checksum: usize = v.iter().sum();
     // let checksum: usize = checksum + v2.iter().sum::<usize>();
@@ -97,19 +96,18 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-fn mergesort(data: &mut[usize]) {
-    let mut tmp_slice1 : Vec<usize>= Vec::with_capacity(data.len());
-    let mut tmp_slice2 : Vec<usize> = Vec::with_capacity(data.len());
+pub fn mergesort(data: &mut [usize]) {
+    let mut tmp_slice1: Vec<usize> = Vec::with_capacity(data.len());
+    let mut tmp_slice2: Vec<usize> = Vec::with_capacity(data.len());
     unsafe {
         tmp_slice1.set_len(data.len());
         tmp_slice2.set_len(data.len());
     }
     mergesort1(data, &mut tmp_slice1, &mut tmp_slice2);
-    tmp_slice1.iter().zip(data).for_each(|(t,b)| *b = *t);
-
+    tmp_slice1.iter().zip(data).for_each(|(t, b)| *b = *t);
 }
 
-fn mergesort1(mut data: &mut [usize], mut to: &mut [usize], mut temp: &mut [usize]) {
+fn mergesort1(mut data: &mut [usize], to: &mut [usize], temp: &mut [usize]) {
     assert_eq!(data.len(), to.len());
     assert_eq!(data.len(), temp.len());
     let thread_index = rayon::current_thread_index().unwrap();
@@ -124,7 +122,7 @@ fn mergesort1(mut data: &mut [usize], mut to: &mut [usize], mut temp: &mut [usiz
             let chunks = data
                 .chunks_mut(data.len() / (steal_counter + 1) + 1)
                 .peekable();
-            println!("{} is Splitting in {} chunks", thread_index, chunks.len());
+            // println!("{} is Splitting in {} chunks", thread_index, chunks.len());
             fn spawn(
                 mut chunks: std::iter::Peekable<std::slice::ChunksMut<usize>>,
                 to: &mut [usize],
@@ -151,8 +149,6 @@ fn mergesort1(mut data: &mut [usize], mut to: &mut [usize], mut temp: &mut [usiz
                                 // let the stealer process it's part
                                 assert_eq!(chunk.len(), left_to.len());
                                 assert_eq!(chunk.len(), left_temp.len());
-                        let thread_index = rayon::current_thread_index().unwrap();
-                                println!("{}: mergesort({})", thread_index, chunk.len());
                                 mergesort1(chunk, left_to, left_temp);
                             },
                         );
@@ -162,16 +158,16 @@ fn mergesort1(mut data: &mut [usize], mut to: &mut [usize], mut temp: &mut [usiz
             // Split my data in the part I've already sorted and the rest (which you give to other
             // threads)
             let index = pieces.iter().map(|x| x.len()).sum(); // how many items we have sorted
-            let (lto, rto) = to.split_at_mut(index);
-            let (ltemp, rtemp) = temp.split_at_mut(index);
+            let (_, rto) = to.split_at_mut(index);
+            let (_, rtemp) = temp.split_at_mut(index);
 
             spawn(chunks, rtemp, rto);
             // we need to merge all those chunks now
-            let chunks = rtemp 
+            let chunks = rtemp
                 .chunks_mut(data.len() / (steal_counter + 1) + 1)
                 .peekable();
             chunks.for_each(|x| pieces.push(x));
-    assert!(pieces.iter().all(|x| x.windows(2).all(|w| w[0] >= w[1])));
+            assert!(pieces.iter().all(|x| x.windows(2).all(|w| w[0] >= w[1])));
             merge(pieces, to);
             assert!(to.windows(2).all(|w| w[0] >= w[1]));
             return;
@@ -183,11 +179,8 @@ fn mergesort1(mut data: &mut [usize], mut to: &mut [usize], mut temp: &mut [usiz
         left.reverse();
         pieces.push(&*left);
     }
-    println!("{} is merging", thread_index);
     merge(pieces, to);
     assert!(to.windows(2).all(|w| w[0] >= w[1]));
-    println!("{} is finished merging", thread_index);
-    //data.iter_mut().zip(buffer).for_each(|(d, b)| *d = *b);
 }
 
 const MIN_WORK_SIZE: usize = 100;
@@ -204,16 +197,6 @@ fn merge(slices: Vec<&[usize]>, buffer: &mut [usize]) {
 
     let mut buffer = buffer.iter_mut();
     while !heap.is_empty() {
-        // assert_eq!(left.len() + right.len(), buffer.len(), "wrong buffers!");
-        /*
-        if num_elements <= MIN_WORK_SIZE {
-            kmerge(slices.into_iter())
-                .zip(buffer)
-                .for_each(|(i, b)| *b = *i);
-            return;
-        }
-        */
-
         let thread_index = rayon::current_thread_index().unwrap();
         let steal_counter = V[thread_index].swap(0, Ordering::Relaxed);
         if steal_counter == 0 || buffer.len() < MIN_WORK_SIZE {
@@ -239,13 +222,7 @@ fn merge(slices: Vec<&[usize]>, buffer: &mut [usize]) {
         } else {
             let steal_counter = steal_counter.count_ones() as usize;
             let steal_counter = std::cmp::min(steal_counter, NUM_THREADS - 1);
-            /*
-            let max_index = heap.iter().max_by_key(|index| index.index).unwrap().index;
-            let shortest = slices.iter().min_by_key(|slice| slice.len()).unwrap().len();
-            if max_index >= shortest {
-                continue; // we are mostly finished, nobody get's anything
-            }
-            */
+
             let slices: Vec<&[usize]> = heap
                 .drain()
                 .map(|index| {
@@ -253,7 +230,6 @@ fn merge(slices: Vec<&[usize]>, buffer: &mut [usize]) {
                     right
                 })
                 .collect();
-            let max_slice = slices.iter().max_by_key(|&index| index.len()).unwrap();
             let buffer = buffer.into_slice();
             // let chunksize = max_slice.len() / (steal_counter + 1) + 1;
 
@@ -284,9 +260,7 @@ fn merge(slices: Vec<&[usize]>, buffer: &mut [usize]) {
                     .collect();
 
                 let (left, right): (Vec<_>, Vec<_>) = splits.iter().cloned().unzip();
-
                 let (b1, b2) = buffer.split_at_mut(left.iter().map(|vec| vec.len()).sum());
-
                 rayon_logs::join(|| spawn(steal_counter - 1, right, b2), || merge(left, b1));
             }
             spawn(steal_counter + 1 /* me */, slices, buffer);
