@@ -1,9 +1,10 @@
 use criterion::Bencher;
 use criterion::BenchmarkGroup;
 use criterion::*;
-use mergesort::{merge, mergesort, steal};
+use mergesort::{mergesort, steal};
 // use rayon_logs::prelude::*;
 use rayon::prelude::*;
+use rayon_adaptive::adaptive_sort;
 #[macro_use]
 extern crate lazy_static;
 use itertools;
@@ -49,7 +50,7 @@ pub fn adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
         group.bench_with_input(BenchmarkId::new("Adaptive", size), &size, |b, &size| {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(size)
-                .steal_callback(move |x| steal(10, x))
+                .steal_callback(move |x| steal::steal(10, x))
                 .build()
                 .unwrap();
 
@@ -65,6 +66,32 @@ pub fn adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
                 BatchSize::SmallInput,
             );
         });
+    }
+}
+pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
+    for size in 1..5 {
+        // &[2, 4, 6, 8, 10, 15, 20, 25, 30] {
+        group.bench_with_input(
+            BenchmarkId::new("Really Adaptive", size),
+            &size,
+            |b, &size| {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(size)
+                    .build()
+                    .unwrap();
+
+                b.iter_batched(
+                    || V.clone(),
+                    |mut numbers| {
+                        pool.install(|| {
+                            adaptive_sort(&mut numbers);
+                            verify(&numbers);
+                        });
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
     }
 }
 
@@ -108,6 +135,7 @@ fn bench(c: &mut Criterion) {
     group.warm_up_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
 
+    //rayon_adaptive(&mut group);
     adaptive(&mut group);
     // group.bench_function("single", |mut b: &mut Bencher| {
     //     single(&mut b);
@@ -118,7 +146,7 @@ fn bench(c: &mut Criterion) {
         iterator(&mut b);
     });
     */
-    // iterator(&mut group);
+    iterator(&mut group);
 
     /*
     group.bench_function("perfect split", |b| {

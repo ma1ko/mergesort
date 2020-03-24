@@ -14,6 +14,7 @@ crossbeam-utils = "*"
 criterion = {path = "../criterion.rs"}
 rand = "*"
 itertools = "*"
+rayon_adaptive = {path= "../rayon-adaptive"}
 
 [[bench]]
 name = "bench"
