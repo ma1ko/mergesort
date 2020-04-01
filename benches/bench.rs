@@ -1,6 +1,7 @@
 use criterion::Bencher;
 use criterion::BenchmarkGroup;
 use criterion::*;
+use mergesort::merge::{merge, two_merge};
 use mergesort::{mergesort, steal};
 // use rayon_logs::prelude::*;
 use rayon::prelude::*;
@@ -23,21 +24,39 @@ fn verify(numbers: &Vec<usize>) {
 pub fn merge_speed_test(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
     let mut v = V.clone();
     v.sort();
-    for size in 10..20 {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .steal_callback(move |x| steal::steal(10, x))
+        .build()
+        .unwrap();
+    for size in 2..6 {
         let mut res = Vec::new();
         res.resize(V.len(), 0);
 
         group.bench_with_input(BenchmarkId::new("Merging_mine", size), &size, |b, &size| {
             b.iter_batched(
-                || (V.clone(), res.clone()),
-                |(numbers, mut res)| {
-                    let chunks = numbers.chunks(numbers.len() / size);
+                || (res.clone(), res.clone()),
+                |(mut res, mut buffer)| {
+                    let chunks: Vec<&[usize]> = v.chunks(v.len() / size).collect();
+                    // let mut buffer = res.clone();
 
-                    res.iter_mut()
-                        .zip(itertools::kmerge(chunks))
-                        .for_each(|(mut r, v)| *r = *v);
+                    assert_eq!(res.len(), buffer.len());
 
-                    //merge(chunks.collect::<Vec<&[usize]>>(), &mut res);
+                    // res.iter_mut()
+                    //     .zip(itertools::kmerge(chunks))
+                    //     .for_each(|(mut r, v)| *r = *v);
+
+                    // pool.install(|| {
+                    //     merge(&chunks, &mut res);
+                    // });
+
+                    // let res = pool.install(|| {
+                    //     let mut locations = Vec::new();
+                    //     chunks.iter().for_each(locations.push(true));
+                    //     two_merge(&chunks, &mut res, locations);
+                    //     res
+                    // });
+                    // verify(&res);
                 },
                 BatchSize::SmallInput,
             );
@@ -153,7 +172,7 @@ fn bench(c: &mut Criterion) {
         perfect_split(b);
     });
     */
-    // merge_speed_test(&mut group);
+    //merge_speed_test(&mut group);
 
     group.finish();
 }

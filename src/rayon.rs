@@ -1,5 +1,5 @@
 use crate::steal;
-pub const NUM_THREADS: usize = 4;
+pub const NUM_THREADS: usize = 2;
 pub fn get_thread_pool() -> rayon_logs::ThreadPool {
     rayon_logs::ThreadPoolBuilder::new()
         .num_threads(NUM_THREADS)
@@ -16,13 +16,14 @@ where
     RA: Send,
     RB: Send,
 {
-    rayon::join(oper_a, oper_b)
+    rayon_logs::join(oper_a, oper_b)
+    // rayon::join(oper_a, oper_b)
 }
 
 pub fn subgraph<OP, R>(work_type: &'static str, work_amount: usize, op: OP) -> R
 where
     OP: FnOnce() -> R,
 {
-    // rayon_logs::subgraph(work_type, work_amount, op)
-    op()
+    rayon_logs::subgraph(work_type, work_amount, op)
+    // op()
 }
