@@ -8,10 +8,12 @@ pub mod rayon;
 pub mod steal;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(1_000_0)
-        .map(|x: usize| x % 1_000)
-        .collect();
+    // let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
+    //     .take(1_000_000)
+    //     .map(|x: usize| x % 1_000_000)
+    //     .collect();
+    let mut v: Vec<usize> = (1..1_000_0).into_iter().collect();
+    v.reverse();
 
     let checksum: usize = v.iter().sum();
 
@@ -20,7 +22,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
     println!("Saving svg");
-    log.save_svg("test.svg").expect("failed saving svg");
+    //   log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
 pub fn mergesort(data: &mut [usize]) {
@@ -88,16 +90,19 @@ fn mergesort1(mut data: &mut [usize], to: &mut [usize]) -> merge::InData {
             // threads)
             let index = pieces.iter().map(|x| x.len()).sum(); // how many items we have sorted
             let (_, rto) = to.split_at_mut(index);
-            // TODO: this is inefficient vector usage
+            // TODO: this is inefficient vector usage und incomprehensible
             let mut locations = Vec::new();
             spawn(chunks, rto, &mut locations);
+            println!("-- start -- ");
+            println!("locations: {:?}", locations);
             locations.reverse();
+            pieces.reverse();
             pieces.iter().for_each(|_| locations.insert(0, true));
-            // let rdata = data; // we don't have ldata anymore
+            pieces.reverse();
+            println!("locations: {:?}", locations);
 
             // we need to merge all those chunks now
             let chunks = data.chunks_mut(total / (steal_counter + 1) + 1).peekable();
-            // pieces.clear();
             chunks.for_each(|x| pieces.push(x));
             let in_data = rayon::subgraph("merging pieces", to.len(), || {
                 merge::two_merge(&mut pieces, to, locations)
