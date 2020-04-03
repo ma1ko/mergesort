@@ -7,14 +7,13 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rayon = {path = "../rayon"}
-rayon_logs = {path = "../rayon-logs"}
+rayon = {git = "https://github.com/ma1ko/rayon"}
+rayon_logs = { git = "https://github.com/ma1ko/rayon-logs"}
 lazy_static = "*"
 crossbeam-utils = "*"
-criterion = {path = "../criterion.rs"}
+criterion = {git = "https://github.com/ma1ko/criterion.rs"}
 rand = "*"
 itertools = "*"
-rayon_adaptive = {path= "../rayon-adaptive"}
 
 [[bench]]
 name = "bench"

@@ -94,12 +94,10 @@ fn mergesort1(mut data: &mut [usize], to: &mut [usize]) -> merge::InData {
             let mut locations = Vec::new();
             spawn(chunks, rto, &mut locations);
             println!("-- start -- ");
-            println!("locations: {:?}", locations);
             locations.reverse();
             pieces.reverse();
             pieces.iter().for_each(|_| locations.insert(0, true));
             pieces.reverse();
-            println!("locations: {:?}", locations);
 
             // we need to merge all those chunks now
             let chunks = data.chunks_mut(total / (steal_counter + 1) + 1).peekable();

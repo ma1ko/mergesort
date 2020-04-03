@@ -1,7 +1,8 @@
 use crate::kmerge_impl;
 use crate::rayon;
 use crate::steal;
-const MIN_WORK_SIZE: usize = 5;
+const MIN_WORK_SIZE: usize = 1000;
+/*
 pub fn merge(slices: &[&[usize]], buffer: &mut [usize]) {
     let slice_iters = slices.iter().map(|x| x.iter());
     let mut iter = kmerge_impl::kmerge(slice_iters);
@@ -73,6 +74,7 @@ pub fn merge(slices: &[&[usize]], buffer: &mut [usize]) {
         }
     }
 }
+*/
 
 // The slice has one more item in front you want to take
 pub unsafe fn put_back_item<T>(slice: &[T]) -> &[T] {
@@ -105,8 +107,6 @@ impl<'a, 'b> MergeResult<'a, 'b> {
     }
 
     fn merge(mut self: &mut Self, other: &mut MergeResult) -> &mut Self {
-        assert!(other.location().windows(2).all(|w| w[0] <= w[1]));
-        assert!(self.location().windows(2).all(|w| w[0] <= w[1]));
         unsafe {
             // be sure that the next block as actually after this block
             assert_eq!(
@@ -120,16 +120,17 @@ impl<'a, 'b> MergeResult<'a, 'b> {
         }
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
-
+        assert!(other.location().windows(2).all(|w| w[0] <= w[1]));
+        assert!(self.location().windows(2).all(|w| w[0] <= w[1]));
         if self.in_data {
             // TODO: this could probably by simpler
-            two_merge1(self.data, other.location(), buffer);
+            two_merge1(self.location(), other.location(), buffer);
             self.buffer = buffer;
             self.in_data = false;
             self.data = data;
             assert!(self.buffer.windows(2).all(|w| w[0] <= w[1]));
         } else {
-            two_merge1(self.buffer, other.location(), data);
+            two_merge1(self.location(), other.location(), data);
             self.buffer = buffer;
             self.in_data = true;
             self.data = data;
@@ -176,7 +177,9 @@ pub fn two_merge<'a>(
 }
 
 pub fn two_merge_prepare(data: &mut Vec<&mut MergeResult>) {
-    // Result is data[0]
+    assert!(data
+        .iter()
+        .all(|x| x.location().windows(2).all(|w| w[0] <= w[1])));
     if data.len() == 1 {
         return;
     };
@@ -239,6 +242,12 @@ pub struct Peekable<I: Iterator> {
     /// Remember a peeked value, even if it was None.
     peeked: Option<Option<I::Item>>,
 }
+impl<I: Iterator> Peekable<I> {
+    pub fn peek(&mut self) -> Option<&I::Item> {
+        let iter = &mut self.iter;
+        self.peeked.get_or_insert_with(|| iter.next()).as_ref()
+    }
+}
 // Itertools::KMergeeBy
 pub struct MergeBy<I, J, F>
 where
@@ -262,7 +271,9 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
     let mut buffer = buffer.iter_mut();
     loop {
         let steal_counter = steal::get_my_steal_count();
-        if steal_counter == 0 || buffer.len() < MIN_WORK_SIZE {
+        if
+        /*steal_counter == 0 || */
+        buffer.len() < MIN_WORK_SIZE {
             // Do a part of the work
             for _ in 0..std::cmp::min(MIN_WORK_SIZE, buffer.len()) {
                 *buffer.next().unwrap() = *iter.next().unwrap();
@@ -281,6 +292,7 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
             // The rest of the buffer
             let mut a = iter.a.iter.as_slice();
             let mut b = iter.b.iter.as_slice();
+
             match iter.a.peeked.take() {
                 Some(Some(_)) => unsafe {
                     a = put_back_item(a);
@@ -299,6 +311,7 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
                 },
                 _ => (),
             }
+
             drop(iter); // after the transmute we probably shouldn't use that thing anymore
             let buffer = buffer.into_slice();
             assert_eq!(a.len() + b.len(), buffer.len());
@@ -339,37 +352,22 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
                 assert!(left_b.windows(2).all(|w| w[0] <= w[1]));
                 assert!(right_a.windows(2).all(|w| w[0] <= w[1]));
                 assert!(right_b.windows(2).all(|w| w[0] <= w[1]));
-                //rayon_logs::join(
-                // || spawn(steal_counter - 1, right_a, right_b, b2),
-                let left_b_copy = left_b.to_vec();
-                let left_a_copy = left_a.to_vec();
-                assert!(left_a_copy.iter().zip(left_a).all(|(a, b)| a == b));
-                assert!(left_b_copy.iter().zip(left_b).all(|(a, b)| a == b));
 
                 left_b.iter().for_each(|b| assert!(*b <= split_elem));
                 left_a.iter().for_each(|b| assert!(*b <= split_elem));
                 right_a.iter().for_each(|b| assert!(*b >= split_elem));
                 right_b.iter().for_each(|b| assert!(*b >= split_elem));
-                two_merge1(left_a, left_b, b1);
+                assert!(left_a.windows(2).all(|w| w[0] <= w[1]));
+                assert!(left_b.windows(2).all(|w| w[0] <= w[1]));
+                assert!(right_a.windows(2).all(|w| w[0] <= w[1]));
+                assert!(right_b.windows(2).all(|w| w[0] <= w[1]));
+                let sum: usize = left_b.iter().sum();
+                //rayon_logs::join(
+                // || spawn(steal_counter - 1, right_a, right_b, b2),
                 two_merge1(right_a, right_b, b2);
-                /*
-                assert!(left_a_copy.iter().zip(left_a).all(|(a, b)| a == b));
-                if !(left_b_copy.iter().zip(left_b).all(|(a, b)| a == b)) {
-                    println!("{:?} \n -> {:?}", left_b, left_b_copy);
-                }
-                assert!(left_b_copy.iter().zip(left_b).all(|(a, b)| a == b));
-                */
-                //);
+                assert_eq!(sum, left_b.iter().sum::<usize>());
+                two_merge1(left_a, left_b, b1);
 
-                /*
-                assert!(
-                    format!(
-                        "split: {}, index_a: {}, index_b: {}, calc: {} \n\n\n left_a: {:?}, \n\n\n left_b_copy: {:?}, \n\n\n merged: {:?} \n\n\n right_a: {:?}, \n\n\n right_b: {:?}, \n\n\n merged: {:?}",
-
-                        split_elem, index_a, index_b, split_for_merge(b, &|a,b| a < b, &split_elem),left_a, left_b, b1, right_a, right_b, b2
-                    )
-                );
-                */
                 assert!(b1.windows(2).all(|w| w[0] <= w[1]));
                 assert!(b2.windows(2).all(|w| w[0] <= w[1]));
                 assert!(
