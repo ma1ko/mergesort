@@ -1,17 +1,16 @@
 use criterion::Bencher;
 use criterion::BenchmarkGroup;
 use criterion::*;
-use mergesort::merge::{merge, two_merge};
+use mergesort::merge::two_merge1;
 use mergesort::{mergesort, steal};
 // use rayon_logs::prelude::*;
 use rayon::prelude::*;
-use rayon_adaptive::adaptive_sort;
 #[macro_use]
 extern crate lazy_static;
 use itertools;
 lazy_static! {
     static ref V: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(1_000_000)
+        .take(2usize.pow(20))
         .map(|x: usize| x % 1_000_000)
         .collect();
     static ref checksum: usize = V.iter().sum();
@@ -24,20 +23,22 @@ fn verify(numbers: &Vec<usize>) {
 pub fn merge_speed_test(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
     let mut v = V.clone();
     v.sort();
+    v.reverse();
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(1)
         .steal_callback(move |x| steal::steal(10, x))
         .build()
         .unwrap();
-    for size in 2..6 {
+    for size in 2..10 {
         let mut res = Vec::new();
         res.resize(V.len(), 0);
 
         group.bench_with_input(BenchmarkId::new("Merging_mine", size), &size, |b, &size| {
             b.iter_batched(
-                || (res.clone(), res.clone()),
-                |(mut res, mut buffer)| {
-                    let chunks: Vec<&[usize]> = v.chunks(v.len() / size).collect();
+                || (v.clone(), res.clone()),
+                |(mut v, mut buffer)| {
+                    let len = v.len();
+                    let mut chunks: Vec<&mut [usize]> = v.chunks_mut(len / size).collect();
                     // let mut buffer = res.clone();
 
                     assert_eq!(res.len(), buffer.len());
@@ -45,10 +46,16 @@ pub fn merge_speed_test(group: &mut BenchmarkGroup<criterion::measurement::WallT
                     // res.iter_mut()
                     //     .zip(itertools::kmerge(chunks))
                     //     .for_each(|(mut r, v)| *r = *v);
+                    let mut locations = Vec::new();
+                    chunks.iter().for_each(|x| locations.push(true));
+                    chunks.iter_mut().for_each(|x| x.sort());
 
-                    // pool.install(|| {
-                    //     merge(&chunks, &mut res);
-                    // });
+                    let chunks: &mut [&mut [usize]] = &mut chunks;
+                    // let x = pool.install(|| two_merge1(chunks, &mut buffer, locations));
+                    // if x {
+                    //     buffer.iter_mut().zip(v).for_each(|(t, b)| *t = b);
+                    // }
+                    verify(&buffer.to_vec());
 
                     // let res = pool.install(|| {
                     //     let mut locations = Vec::new();
@@ -64,7 +71,7 @@ pub fn merge_speed_test(group: &mut BenchmarkGroup<criterion::measurement::WallT
     }
 }
 pub fn adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
-    for size in 4..5 {
+    for size in 1..5 {
         // &[2, 4, 6, 8, 10, 15, 20, 25, 30] {
         group.bench_with_input(BenchmarkId::new("Adaptive", size), &size, |b, &size| {
             let pool = rayon::ThreadPoolBuilder::new()
@@ -103,7 +110,7 @@ pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTim
                     || V.clone(),
                     |mut numbers| {
                         pool.install(|| {
-                            adaptive_sort(&mut numbers);
+                            //adaptive_sort(&mut numbers);
                             verify(&numbers);
                         });
                     },
@@ -172,7 +179,7 @@ fn bench(c: &mut Criterion) {
         perfect_split(b);
     });
     */
-    //merge_speed_test(&mut group);
+    // merge_speed_test(&mut group);
 
     group.finish();
 }

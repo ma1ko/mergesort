@@ -1,5 +1,5 @@
 use crate::steal;
-pub const NUM_THREADS: usize = 1;
+pub const NUM_THREADS: usize = 4;
 pub fn get_thread_pool() -> rayon_logs::ThreadPool {
     rayon_logs::ThreadPoolBuilder::new()
         .num_threads(NUM_THREADS)

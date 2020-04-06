@@ -1,19 +1,18 @@
 #[macro_use]
 extern crate lazy_static;
 use crossbeam_utils as crossbeam;
-mod insertion_sort;
 mod kmerge_impl;
 pub mod merge;
 pub mod rayon;
 pub mod steal;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-    //     .take(1_000_000)
-    //     .map(|x: usize| x % 1_000_000)
-    //     .collect();
-    let mut v: Vec<usize> = (1..1_000_0).into_iter().collect();
-    v.reverse();
+    let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
+        .take(2usize.pow(20))
+        .map(|x: usize| x % 1_000_000)
+        .collect();
+    // let mut v: Vec<usize> = (0..2usize.pow(20)).into_iter().collect();
+    // v.reverse();
 
     let checksum: usize = v.iter().sum();
 
@@ -27,11 +26,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 pub fn mergesort(data: &mut [usize]) {
     let mut tmp_slice1: Vec<usize> = Vec::with_capacity(data.len());
-    unsafe {
-        tmp_slice1.set_len(data.len());
-    }
+    tmp_slice1.resize(data.len(), 0);
     let in_data = rayon::subgraph("Mergesort", tmp_slice1.len(), || {
-        mergesort1(data, &mut tmp_slice1)
+        let mut pieces = Vec::new();
+        mergesort1(data, &mut tmp_slice1, &mut pieces);
+        pieces[0].in_data
     });
 
     if !in_data {
@@ -40,97 +39,93 @@ pub fn mergesort(data: &mut [usize]) {
         });
     };
 }
+fn merge_neighbors(pieces: &mut Vec<merge::MergeResult>) {
+    while pieces.len() >= 2 {
+        let len = pieces.len();
+        let a = &pieces[len - 2];
+        let b = &pieces[len - 1];
+        if a.len() == b.len() {
+            // TODO maybe this is possible to do more efficently
+            let b = pieces.pop().unwrap();
+            let mut a = pieces.pop().unwrap();
+            assert_eq!(a.in_data, b.in_data);
+            assert_eq!(a.len(), b.len());
 
-fn mergesort1(mut data: &mut [usize], to: &mut [usize]) -> merge::InData {
-    let mut work_size = 100;
+            // println!("Merging blocks of {}", a.len());
+            a.merge(b);
+            pieces.push(a); // Remove b
+        } else {
+            // println!("Couldn't merge {} and {}", a.len(), b.len());
+            break;
+        }
+    }
+}
+fn mergesort1<'a>(
+    mut data: &'a mut [usize],
+    mut to: &'a mut [usize],
+    mut pieces: &mut Vec<merge::MergeResult<'a>>,
+) {
+    assert!(data.len() > 0);
     assert_eq!(data.len(), to.len());
-    let mut pieces: Vec<&mut [usize]> = Vec::new();
+    let mut index: usize = pieces.iter().map(|x| x.len()).sum::<usize>();
+    let total = data.len() + index;
+    // println!("I have {} elements, plus {}", total, index);
 
-    while !data.is_empty() {
+    while total - index > 0 {
+        let elem_left = data.len();
         let steal_counter = steal::get_my_steal_count();
-        if steal_counter > 0 && data.len() > 1000 {
-            // If there's more steals than threads, just create tasks for all *other* threads
-            let total: usize = data.len();
-            let chunks = data
-                .chunks_mut(data.len() / (steal_counter + 1) + 1)
-                .peekable();
-            fn spawn(
-                mut chunks: std::iter::Peekable<std::slice::ChunksMut<usize>>,
-                to: &mut [usize],
-                location: &mut Vec<merge::InData>,
-            ) {
-                let chunk = chunks.next().unwrap();
-                match chunks.peek() {
-                    None => {
-                        // finished recursion, let's do our part of the data
-                        let in_data =
-                            rayon::subgraph("sorting", chunk.len(), || mergesort1(chunk, to));
-                        location.push(in_data);
-                    }
-                    Some(_) => {
-                        let (left_to, right_to) = to.split_at_mut(chunk.len());
-                        let (_, in_data) = rayon::join(
-                            || {
-                                // prepare another task for the next stealer
-                                spawn(chunks, right_to, location)
-                            },
-                            || {
-                                // let the stealer process it's part
-                                let in_data = rayon::subgraph("sorting", chunk.len(), || {
-                                    mergesort1(chunk, left_to)
-                                });
-                                in_data
-                            },
-                        );
-                        location.push(in_data);
-                    }
-                }
-            }
-            // Split my data in the part I've already sorted and the rest (which you give to other
-            // threads)
-            let index = pieces.iter().map(|x| x.len()).sum(); // how many items we have sorted
-            let (_, rto) = to.split_at_mut(index);
-            // TODO: this is inefficient vector usage und incomprehensible
-            let mut locations = Vec::new();
-            spawn(chunks, rto, &mut locations);
-            println!("-- start -- ");
-            locations.reverse();
-            pieces.reverse();
-            pieces.iter().for_each(|_| locations.insert(0, true));
-            pieces.reverse();
-
+        if steal_counter > 0 && elem_left > 1024 {
+            let split_index = if index < total / 2 {
+                total / 2
+            } else {
+                // that's more complex here...
+                // data.len() / 4
+                continue; // just ignore that steal
+            };
+            let (left_to, right_to) = to.split_at_mut(split_index - index);
+            let (a, b) = data.split_at_mut(split_index - index);
+            // println!("Splitting in {} vs {}", a.len(), b.len());
+            let mut other_pieces = Vec::new();
+            // TODO: understand the lifetimes issues here06.02.2020
+            let (mut pieces, mut other_pieces) = rayon::join(
+                move || {
+                    mergesort1(a, left_to, pieces);
+                    return pieces;
+                },
+                move || {
+                    mergesort1(b, right_to, &mut other_pieces);
+                    return other_pieces;
+                },
+            );
+            // assert!(loc_a == loc_b);
             // we need to merge all those chunks now
-            let chunks = data.chunks_mut(total / (steal_counter + 1) + 1).peekable();
-            chunks.for_each(|x| pieces.push(x));
-            let in_data = rayon::subgraph("merging pieces", to.len(), || {
-                merge::two_merge(&mut pieces, to, locations)
-            });
-            return in_data;
-
-            /*
-            rayon::subgraph("merging together", rtemp.len(), || {
-                merge::two_merge1(ltemp, rtemp, to);
-            });
-            */
-            /*
-            rayon::subgraph("merging", to.len(), || {
-                merge::two_merge(&pieces, to, data);
-            });
-            */
+            pieces.append(&mut other_pieces);
+            merge_neighbors(&mut pieces);
+            assert_eq!(pieces.len(), 1);
+            return;
         }
         // Sort a piece
-        let (left, right) = data.split_at_mut(std::cmp::min(data.len(), work_size));
-        work_size += 100;
-        data = right;
-        left.sort();
-        //insertion_sort::insertion_sort(left, &|a, b| a < b);
-        pieces.push(&mut *left);
+        // let (left, right) = data.split_at_mut(std::cmp::min(data.len(), work_size));
+        let work_size = std::cmp::min(128, elem_left);
+        let (piece, rest) = data.split_at_mut(work_size); // &mut data[index..index + 100];
+        data = rest;
+        piece.sort();
+        let (buffer, rest) = to.split_at_mut(work_size); // mut to[index..index + 100];
+        to = rest;
+        let merge = merge::MergeResult::new(piece, buffer, true);
+        index += work_size;
+        pieces.push(merge);
+        // try merging pieces
+        merge_neighbors(&mut pieces);
     }
-    let mut loc = Vec::new();
-    loc.resize(pieces.len(), true);
-    rayon::subgraph("merging", to.len(), || {
-        merge::two_merge(&mut pieces, to, loc)
-    })
+    if pieces.len() != 1 {
+        println!(
+            "We have {:?}",
+            pieces.iter().map(|x| x.len()).collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(pieces.len(), 1);
+    return;
 }
 // Mabye we can rewrite it a bit more like that
 // pub fn recursive_join<I, T, F>(it: I, f: F)
