@@ -134,13 +134,13 @@ impl<'a, 'b> MergeResult<'a> {
             self.buffer = buffer;
             self.in_data = false;
             self.data = data;
-            assert!(self.buffer.windows(2).all(|w| w[0] <= w[1]));
+        // assert!(self.buffer.windows(2).all(|w| w[0] <= w[1]));
         } else {
             two_merge1(self.location(), other.location(), data);
             self.buffer = buffer;
             self.in_data = true;
             self.data = data;
-            assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+            // assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
         }
         self
     }
@@ -268,8 +268,8 @@ pub struct MergeLte;
 pub type Merge<I, J> = MergeBy<I, J, MergeLte>;
 
 pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
-    assert!(a.windows(2).all(|w| w[0] <= w[1]));
-    assert!(b.windows(2).all(|w| w[0] <= w[1]));
+    // assert!(a.windows(2).all(|w| w[0] <= w[1]));
+    // assert!(b.windows(2).all(|w| w[0] <= w[1]));
     assert_eq!(a.len() + b.len(), buffer.len());
     use itertools::Itertools;
     let mut iter = a.iter().merge(b.iter());
@@ -284,10 +284,10 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
             if buffer.len() == 0 {
                 return; // finished
             }
-            assert_eq!(iter.size_hint().0, buffer.len());
+        // assert_eq!(iter.size_hint().0, buffer.len());
         // println!("iter: {}, buffer: {}", iter.size_hint().0, buffer.len());
         } else {
-            assert_eq!(iter.size_hint().0, buffer.len());
+            // assert_eq!(iter.size_hint().0, buffer.len());
             // Someone is trying to steal. We need to recover the slices from the merging.
             let mut iter: Merge<std::slice::Iter<usize>, std::slice::Iter<usize>> =
                 unsafe { std::mem::transmute(iter) };
@@ -299,18 +299,12 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
             match iter.a.peeked.take() {
                 Some(Some(_)) => unsafe {
                     a = put_back_item(a);
-                    if a.len() > 1 {
-                        assert!(a[0] <= a[1]);
-                    }
                 },
                 _ => (),
             }
             match iter.b.peeked.take() {
                 Some(Some(_)) => unsafe {
                     b = put_back_item(b);
-                    if b.len() > 1 {
-                        assert!(b[0] <= b[1]);
-                    }
                 },
                 _ => (),
             }

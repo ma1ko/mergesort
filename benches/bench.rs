@@ -72,7 +72,7 @@ pub fn merge_speed_test(group: &mut BenchmarkGroup<criterion::measurement::WallT
 }
 pub fn adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
     for size in 1..5 {
-        // &[2, 4, 6, 8, 10, 15, 20, 25, 30] {
+        //&[2, 4, 6, 8, 10, 12, 15, 20, 25, 30] {
         group.bench_with_input(BenchmarkId::new("Adaptive", size), &size, |b, &size| {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(size)

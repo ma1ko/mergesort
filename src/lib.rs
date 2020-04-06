@@ -20,14 +20,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_, log) = pool.logging_install(|| mergesort(&mut v));
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
+    println!("Saving log");
+    log.save("test").expect("failed saving log");
     println!("Saving svg");
-    //   log.save_svg("test.svg").expect("failed saving svg");
+    log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
 pub fn mergesort(data: &mut [usize]) {
     let mut tmp_slice1: Vec<usize> = Vec::with_capacity(data.len());
     tmp_slice1.resize(data.len(), 0);
-    let in_data = rayon::subgraph("Mergesort", tmp_slice1.len(), || {
+    let in_data = rayon::subgraph("sorting", tmp_slice1.len(), || {
         let mut pieces = Vec::new();
         mergesort1(data, &mut tmp_slice1, &mut pieces);
         pieces[0].in_data
@@ -52,6 +54,7 @@ fn merge_neighbors(pieces: &mut Vec<merge::MergeResult>) {
             assert_eq!(a.len(), b.len());
 
             // println!("Merging blocks of {}", a.len());
+            // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b));
             a.merge(b);
             pieces.push(a); // Remove b
         } else {
@@ -74,27 +77,35 @@ fn mergesort1<'a>(
     while total - index > 0 {
         let elem_left = data.len();
         let steal_counter = steal::get_my_steal_count();
-        if steal_counter > 0 && elem_left > 1024 {
+        if steal_counter > 0 && elem_left > 4096 {
             let split_index = if index < total / 2 {
                 total / 2
             } else {
-                // that's more complex here...
-                // data.len() / 4
-                continue; // just ignore that steal
+                if index < total / 4 {
+                    continue;
+                } else {
+                    // that's more complex here...
+                    // data.len() / 4
+                    continue; // just ignore that steal
+                }
             };
             let (left_to, right_to) = to.split_at_mut(split_index - index);
             let (a, b) = data.split_at_mut(split_index - index);
             // println!("Splitting in {} vs {}", a.len(), b.len());
             let mut other_pieces = Vec::new();
-            // TODO: understand the lifetimes issues here06.02.2020
+            // TODO: understand the lifetimes issues here
             let (mut pieces, mut other_pieces) = rayon::join(
                 move || {
-                    mergesort1(a, left_to, pieces);
-                    return pieces;
+                    rayon::subgraph("sorting", split_index, move || {
+                        mergesort1(a, left_to, pieces);
+                        return pieces;
+                    })
                 },
                 move || {
-                    mergesort1(b, right_to, &mut other_pieces);
-                    return other_pieces;
+                    rayon::subgraph("sorting", split_index, move || {
+                        mergesort1(b, right_to, &mut other_pieces);
+                        return other_pieces;
+                    })
                 },
             );
             // assert!(loc_a == loc_b);
@@ -106,7 +117,7 @@ fn mergesort1<'a>(
         }
         // Sort a piece
         // let (left, right) = data.split_at_mut(std::cmp::min(data.len(), work_size));
-        let work_size = std::cmp::min(128, elem_left);
+        let work_size = std::cmp::min(1024, elem_left);
         let (piece, rest) = data.split_at_mut(work_size); // &mut data[index..index + 100];
         data = rest;
         piece.sort();
