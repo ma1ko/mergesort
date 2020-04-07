@@ -26,22 +26,28 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
-pub fn mergesort(data: &mut [usize]) {
-    let mut tmp_slice1: Vec<usize> = Vec::with_capacity(data.len());
-    tmp_slice1.resize(data.len(), 0);
-    let in_data = rayon::subgraph("sorting", tmp_slice1.len(), || {
+pub fn mergesort<T>(data: &mut [T])
+where
+    T: Ord + Sync + Send + Copy + Default,
+{
+    let mut tmp_slice: Vec<T> = Vec::with_capacity(data.len());
+    unsafe { tmp_slice.set_len(data.len()) }
+    let in_data = rayon::subgraph("sorting", tmp_slice.len(), || {
         let mut pieces = Vec::new();
-        mergesort1(data, &mut tmp_slice1, &mut pieces);
+        mergesort1(data, &mut tmp_slice, &mut pieces);
         pieces[0].in_data
     });
 
     if !in_data {
-        rayon::subgraph("last copy", tmp_slice1.len(), || {
-            tmp_slice1.iter().zip(data).for_each(|(t, b)| *b = *t);
+        rayon::subgraph("last copy", tmp_slice.len(), || {
+            tmp_slice.iter().zip(data).for_each(|(t, b)| *b = *t);
         });
     };
 }
-fn merge_neighbors(pieces: &mut Vec<merge::MergeResult>) {
+fn merge_neighbors<T>(pieces: &mut Vec<merge::MergeResult<T>>)
+where
+    T: Ord + Sync + Send + Copy,
+{
     while pieces.len() >= 2 {
         // to merge we need at least two parts
         let len = pieces.len();
@@ -62,11 +68,13 @@ fn merge_neighbors(pieces: &mut Vec<merge::MergeResult>) {
         }
     }
 }
-fn mergesort1<'a>(
-    mut data: &'a mut [usize],
-    mut to: &'a mut [usize],
-    mut pieces: &mut Vec<merge::MergeResult<'a>>,
-) {
+fn mergesort1<'a, T>(
+    mut data: &'a mut [T],
+    mut to: &'a mut [T],
+    mut pieces: &mut Vec<merge::MergeResult<'a, T>>,
+) where
+    T: Ord + Sync + Send + Copy,
+{
     assert!(!data.is_empty());
     assert_eq!(data.len(), to.len());
     // How much is currently sorted

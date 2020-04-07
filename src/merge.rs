@@ -13,13 +13,19 @@ pub unsafe fn put_back_item<T>(slice: &[T]) -> &[T] {
     std::slice::from_raw_parts(start, len)
 }
 #[derive(Debug, PartialEq, Eq)]
-pub struct MergeResult<'a> {
-    pub data: &'a mut [usize], // that's where it starts and should be after it's merged
-    pub buffer: &'a mut [usize], // that's where it temporarily might be
-    pub in_data: bool,         // true if the sorted data is in the data, false if it's buffer
+pub struct MergeResult<'a, T>
+where
+    T: Ord + Sync + Send + Copy,
+{
+    pub data: &'a mut [T], // that's where it starts and should be after it's merged
+    pub buffer: &'a mut [T], // that's where it temporarily might be
+    pub in_data: bool,     // true if the sorted data is in the data, false if it's buffer
 }
-impl<'a, 'b> MergeResult<'a> {
-    pub fn new(data: &'a mut [usize], buffer: &'a mut [usize], in_data: bool) -> MergeResult<'a> {
+impl<'a, T> MergeResult<'a, T>
+where
+    T: Ord + Sync + Send + Copy,
+{
+    pub fn new(data: &'a mut [T], buffer: &'a mut [T], in_data: bool) -> MergeResult<'a, T> {
         assert_eq!(data.len(), buffer.len());
         MergeResult {
             data,
@@ -27,7 +33,7 @@ impl<'a, 'b> MergeResult<'a> {
             in_data,
         }
     }
-    pub fn location(self: &'a Self) -> &'a [usize] {
+    pub fn location(self: &'a Self) -> &'a [T] {
         if self.in_data {
             self.data
         } else {
@@ -38,7 +44,7 @@ impl<'a, 'b> MergeResult<'a> {
         return self.data.len();
     }
 
-    pub fn merge(mut self: &mut Self, other: MergeResult) -> &mut Self {
+    pub fn merge(mut self: &mut Self, other: MergeResult<T>) -> &mut Self {
         assert!(self.in_data == other.in_data);
         unsafe {
             // be sure that the next block as actually after this block
@@ -99,7 +105,10 @@ where
 pub struct MergeLte;
 pub type Merge<I, J> = MergeBy<I, J, MergeLte>;
 
-pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
+pub fn two_merge1<T>(a: &[T], b: &[T], buffer: &mut [T])
+where
+    T: Ord + Sync + Send + Copy,
+{
     assert_eq!(a.len() + b.len(), buffer.len());
     use itertools::Itertools;
     let mut iter = a.iter().merge(b.iter());
@@ -117,7 +126,7 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
         } else {
             // Someone is trying to steal. We need to recover the slices from the merging.
             // Unsafe: If the MergeBy struct in Itertools changes, this need to be updated
-            let mut iter: Merge<std::slice::Iter<usize>, std::slice::Iter<usize>> =
+            let mut iter: Merge<std::slice::Iter<T>, std::slice::Iter<T>> =
                 unsafe { std::mem::transmute(iter) };
 
             let mut a = iter.a.iter.as_slice();
@@ -143,7 +152,10 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
             let buffer = buffer.into_slice();
             assert_eq!(a.len() + b.len(), buffer.len());
 
-            fn spawn(steal_counter: usize, a: &[usize], b: &[usize], buffer: &mut [usize]) {
+            fn spawn<T>(steal_counter: usize, a: &[T], b: &[T], buffer: &mut [T])
+            where
+                T: Ord + Send + Sync + Copy,
+            {
                 // Split the inputs and buffer into steal_counter subslices
                 // the longer slice
                 let max_slice = if a.len() > b.len() { a } else { b };
