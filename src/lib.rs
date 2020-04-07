@@ -43,23 +43,22 @@ pub fn mergesort(data: &mut [usize]) {
 }
 fn merge_neighbors(pieces: &mut Vec<merge::MergeResult>) {
     while pieces.len() >= 2 {
+        // to merge we need at least two parts
         let len = pieces.len();
         let a = &pieces[len - 2];
         let b = &pieces[len - 1];
         if a.len() == b.len() {
-            // TODO maybe this is possible to do more efficently
-            let b = pieces.pop().unwrap();
-            let mut a = pieces.pop().unwrap();
+            // we can merge
+            let b = pieces.pop().unwrap(); //remove the last
+            let a = &mut pieces.last_mut().unwrap();
             assert_eq!(a.in_data, b.in_data);
             assert_eq!(a.len(), b.len());
 
-            // println!("Merging blocks of {}", a.len());
             // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b));
             a.merge(b);
-            pieces.push(a); // Remove b
         } else {
             // println!("Couldn't merge {} and {}", a.len(), b.len());
-            break;
+            break; // nothing to do
         }
     }
 }
@@ -68,9 +67,11 @@ fn mergesort1<'a>(
     mut to: &'a mut [usize],
     mut pieces: &mut Vec<merge::MergeResult<'a>>,
 ) {
-    assert!(data.len() > 0);
+    assert!(!data.is_empty());
     assert_eq!(data.len(), to.len());
+    // How much is currently sorted
     let mut index: usize = pieces.iter().map(|x| x.len()).sum::<usize>();
+    // Total amount of elements in the slice
     let total = data.len() + index;
     // println!("I have {} elements, plus {}", total, index);
 
@@ -108,32 +109,24 @@ fn mergesort1<'a>(
                     })
                 },
             );
-            // assert!(loc_a == loc_b);
             // we need to merge all those chunks now
             pieces.append(&mut other_pieces);
             merge_neighbors(&mut pieces);
             assert_eq!(pieces.len(), 1);
             return;
         }
-        // Sort a piece
-        // let (left, right) = data.split_at_mut(std::cmp::min(data.len(), work_size));
-        let work_size = std::cmp::min(1024, elem_left);
-        let (piece, rest) = data.split_at_mut(work_size); // &mut data[index..index + 100];
+        // Do some work: Split off and sort piece
+        let work_size = std::cmp::min(4096, elem_left);
+        let (piece, rest) = data.split_at_mut(work_size);
         data = rest;
         piece.sort();
-        let (buffer, rest) = to.split_at_mut(work_size); // mut to[index..index + 100];
+        let (buffer, rest) = to.split_at_mut(work_size);
         to = rest;
         let merge = merge::MergeResult::new(piece, buffer, true);
         index += work_size;
         pieces.push(merge);
         // try merging pieces
         merge_neighbors(&mut pieces);
-    }
-    if pieces.len() != 1 {
-        println!(
-            "We have {:?}",
-            pieces.iter().map(|x| x.len()).collect::<Vec<_>>()
-        );
     }
     assert_eq!(pieces.len(), 1);
     return;

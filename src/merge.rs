@@ -2,79 +2,6 @@ use crate::kmerge_impl;
 use crate::rayon;
 use crate::steal;
 const MIN_WORK_SIZE: usize = 1000;
-/*
-pub fn merge(slices: &[&[usize]], buffer: &mut [usize]) {
-    let slice_iters = slices.iter().map(|x| x.iter());
-    let mut iter = kmerge_impl::kmerge(slice_iters);
-
-    let mut buffer = buffer.iter_mut();
-    loop {
-        let steal_counter = steal::get_my_steal_count();
-        if steal_counter == 0 || buffer.len() < MIN_WORK_SIZE {
-            // Do a part of the work
-            for _ in 0..std::cmp::min(MIN_WORK_SIZE, buffer.len()) {
-                *buffer.next().unwrap() = *iter.next().unwrap();
-            }
-            if buffer.len() == 0 {
-                return;
-            }
-        } else {
-            // Someone is trying to steal. We need to recover the slices from the merging.
-            let slices = iter
-                .heap
-                .iter_mut()
-                .map(|headtail| {
-                    // kmerge has a structing with one head element and tail iterator
-                    // that's the tail
-                    let slice = headtail.tail.as_slice();
-                    unsafe {
-                        // we now get the head by constructing a slice that's one element larger at
-                        // the front
-                        let start = slice.get_unchecked(0) as *const usize;
-                        let start = start.offset(-1);
-                        let len = slice.len() + 1;
-                        std::slice::from_raw_parts(start, len)
-                    }
-                })
-                .collect();
-
-            // The rest of the buffer
-            let buffer = buffer.into_slice();
-
-            fn spawn(steal_counter: usize, slices: Vec<&[usize]>, buffer: &mut [usize]) {
-                // assert_eq!(slices.iter().map(|x| x.len()).sum::<usize>(), buffer.len());
-                let max_slice = slices.iter().max_by_key(|&index| index.len()).unwrap();
-                if steal_counter == 1 || max_slice.len() < MIN_WORK_SIZE / slices.len() {
-                    rayon_logs::subgraph("merging", buffer.len(), || {
-                        merge(&slices, buffer);
-                    });
-                    // assert!(buffer.windows(2).all(|w| w[0] <= w[1]));
-                    return;
-                }
-                let split = max_slice.len() / steal_counter;
-                // the element to split
-                let split_elem = max_slice[split];
-
-                // find the splitting points in all splices
-                let splits: Vec<(&[usize], &[usize])> = slices
-                    .iter()
-                    .map(|slice| {
-                        let index = split_for_merge(slice, &|a, b| a < b, &split_elem);
-                        slice.split_at(index)
-                    })
-                    .collect();
-
-                let (left, right): (Vec<_>, Vec<_>) = splits.iter().cloned().unzip();
-                // split the buffer at the sum of all left splits length (so they are the same size
-                let (b1, b2) = buffer.split_at_mut(left.iter().map(|vec| vec.len()).sum());
-                rayon_logs::join(|| spawn(steal_counter - 1, right, b2), || merge(&left, b1));
-            }
-            spawn(steal_counter + 1 /* me */, slices, buffer);
-            return;
-        }
-    }
-}
-*/
 
 // The slice has one more item in front you want to take
 pub unsafe fn put_back_item<T>(slice: &[T]) -> &[T] {
@@ -126,22 +53,15 @@ impl<'a, 'b> MergeResult<'a> {
         }
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
-        // assert!(other.location().windows(2).all(|w| w[0] <= w[1]));
-        // assert!(self.location().windows(2).all(|w| w[0] <= w[1]));
         if self.in_data {
             // TODO: this could probably by simpler
             two_merge1(self.location(), other.location(), buffer);
-            self.buffer = buffer;
-            self.in_data = false;
-            self.data = data;
-        // assert!(self.buffer.windows(2).all(|w| w[0] <= w[1]));
         } else {
             two_merge1(self.location(), other.location(), data);
-            self.buffer = buffer;
-            self.in_data = true;
-            self.data = data;
-            // assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
         }
+        self.in_data = !self.in_data;
+        self.data = data;
+        self.buffer = buffer;
         self
     }
 }
@@ -154,94 +74,6 @@ pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T])
 }
 
 pub type InData = bool;
-// pub fn two_merge<'a>(
-//     data: &'a mut [&mut [usize]],
-//     mut to: &'a mut [usize],
-//     location: InData,
-// ) -> InData {
-//     if data.len() < 2 {
-//         return true; // data is (hopefully) sorted, we didn't do anything
-//     };
-//     // assert_eq!(data.iter().map(|x| x.len()).sum::<usize>(), to.len());
-//     /*let mut r: Vec<MergeResult<'a>> = */
-//     let mut x = Vec::new();
-//     for v in data.iter_mut() {
-//         // this just doesn't seem to work with data.iter().map() because of lifetimes and stuff...
-//         let (l, r): (&mut [usize], _) = to.split_at_mut(v.len());
-//         to = r;
-//         let m = MergeResult::new(v, l, location);
-//         x.push(m);
-//     }
-//     let mut x: Vec<&mut MergeResult> = x.iter_mut().collect();
-
-//     assert!(x
-//         .iter()
-//         .all(|x| x.location().windows(2).all(|w| w[0] <= w[1])));
-//     two_merge_prepare(&mut x);
-//     return x[0].in_data;
-// }
-
-// pub fn two_merge_prepare(data: &mut Vec<&mut MergeResult>) {
-//     assert!(data
-//         .iter()
-//         .all(|x| x.location().windows(2).all(|w| w[0] <= w[1])));
-//     if data.len() == 1 {
-//         return;
-//     };
-//     let mut x: Vec<&mut MergeResult> = data
-//         .chunks_mut(2)
-//         .map(|chunk| {
-//             if chunk.len() == 1 {
-//                 // chunk.get(0).unwrap()
-//                 // unimplemented!()
-//                 &mut chunk[0]
-//             } else {
-//                 let (a, b) = chunk.split_at_mut(1);
-//                 let a: &mut MergeResult = &mut a[0];
-//                 let b: &mut MergeResult = &mut b[0];
-//                 // assert_eq!(a.data.len(), a.buffer.len());
-//                 // assert_eq!(b.data.len(), b.buffer.len());
-//                 let x: &mut MergeResult = a.merge(*b);
-//                 assert!(x.location().windows(2).all(|w| w[0] <= w[1]));
-//                 // assert_eq!(x.data.len(), x.buffer.len());
-//                 x
-//             }
-//         })
-//         .collect();
-//     // assert!(x.len() > 0);
-//     two_merge_prepare(&mut x);
-// }
-// pub fn two_merge(slices: &[&[usize]], buffer: &mut [usize], temp: &mut [usize]) {
-//     assert_eq!(slices.iter().map(|x| x.len()).sum::<usize>(), buffer.len());
-//     assert_eq!(buffer.len(), temp.len());
-//     if slices.len() == 0 {
-//         return;
-//     }
-//     if slices.len() > 2 {
-//         let len = slices.len();
-//         let (left, right) = slices.split_at(len / 2);
-//         let (tleft, tright) = temp.split_at_mut(left.iter().map(|x| x.len()).sum());
-//         let (bleft, bright) = buffer.split_at_mut(tleft.len());
-//         let steal_counter = steal::get_my_steal_count();
-//         if steal_counter > 0 {
-//             rayon::join(
-//                 || two_merge(left, tleft, bleft),
-//                 || two_merge(right, tright, bright),
-//             );
-//         } else {
-//             two_merge(left, tleft, bleft);
-//             two_merge(right, tright, bright);
-//         }
-//         two_merge1(tleft, tright, buffer);
-//     } else {
-//         if slices.len() == 1 {
-//             buffer.copy_from_slice(slices[0]);
-//         } else {
-//             two_merge1(slices[0], slices[1], buffer);
-//         }
-//     }
-// }
-// std::iter::peekable
 pub struct Peekable<I: Iterator> {
     iter: I,
     /// Remember a peeked value, even if it was None.
@@ -268,8 +100,6 @@ pub struct MergeLte;
 pub type Merge<I, J> = MergeBy<I, J, MergeLte>;
 
 pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
-    // assert!(a.windows(2).all(|w| w[0] <= w[1]));
-    // assert!(b.windows(2).all(|w| w[0] <= w[1]));
     assert_eq!(a.len() + b.len(), buffer.len());
     use itertools::Itertools;
     let mut iter = a.iter().merge(b.iter());
@@ -284,18 +114,17 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
             if buffer.len() == 0 {
                 return; // finished
             }
-        // assert_eq!(iter.size_hint().0, buffer.len());
-        // println!("iter: {}, buffer: {}", iter.size_hint().0, buffer.len());
         } else {
-            // assert_eq!(iter.size_hint().0, buffer.len());
             // Someone is trying to steal. We need to recover the slices from the merging.
+            // Unsafe: If the MergeBy struct in Itertools changes, this need to be updated
             let mut iter: Merge<std::slice::Iter<usize>, std::slice::Iter<usize>> =
                 unsafe { std::mem::transmute(iter) };
 
-            // The rest of the buffer
             let mut a = iter.a.iter.as_slice();
             let mut b = iter.b.iter.as_slice();
 
+            // We need to check if the iterator has peeked on any not-used elements yet
+            // if yes, we need to put them back in the slice
             match iter.a.peeked.take() {
                 Some(Some(_)) => unsafe {
                     a = put_back_item(a);
@@ -308,47 +137,43 @@ pub fn two_merge1(a: &[usize], b: &[usize], buffer: &mut [usize]) {
                 },
                 _ => (),
             }
-
-            drop(iter); // after the transmute we probably shouldn't use that thing anymore
+            // after the transmute we probably shouldn't use the iterator anymore
+            drop(iter);
+            // That's the rest of the buffer
             let buffer = buffer.into_slice();
             assert_eq!(a.len() + b.len(), buffer.len());
 
             fn spawn(steal_counter: usize, a: &[usize], b: &[usize], buffer: &mut [usize]) {
-                assert_eq!(a.len() + b.len(), buffer.len());
-                // assert!(a.windows(2).all(|w| w[0] <= w[1]));
-                // assert!(b.windows(2).all(|w| w[0] <= w[1]));
+                // Split the inputs and buffer into steal_counter subslices
+                // the longer slice
                 let max_slice = if a.len() > b.len() { a } else { b };
 
                 if steal_counter == 1 || max_slice.len() < MIN_WORK_SIZE {
+                    // finished splitting, let's just merge
                     rayon_logs::subgraph("merging", buffer.len(), || {
                         two_merge1(a, b, buffer);
                     });
-                    // assert!(buffer.windows(2).all(|w| w[0] <= w[1]));
                     return;
                 }
 
+                // we split the maximum slice an len / stealers element.
+                // For the other slice, we split at the same element.
                 let split = max_slice.len() / steal_counter;
                 // the element to split
                 let split_elem = max_slice[split];
 
                 // find the splitting points in all splices
-
                 let index_a = split_for_merge(a, &|a, b| a < b, &split_elem);
                 let index_b = split_for_merge(b, &|a, b| a < b, &split_elem);
-                // assert!(a.windows(2).all(|w| w[0] <= w[1]));
                 let (left_a, right_a) = a.split_at(index_a);
-                // assert!(b.windows(2).all(|w| w[0] <= w[1]));
                 let (left_b, right_b) = b.split_at(index_b);
 
                 let (b1, b2) = buffer.split_at_mut(left_a.len() + left_b.len());
 
                 rayon_logs::join(
                     || spawn(steal_counter - 1, right_a, right_b, b2),
-                    || two_merge1(left_a, left_b, b1),
+                    || rayon_logs::subgraph("merging", b1.len(), || two_merge1(left_a, left_b, b1)),
                 );
-
-                // assert!(b1.windows(2).all(|w| w[0] <= w[1]));
-                // assert!(b2.windows(2).all(|w| w[0] <= w[1]));
             }
             spawn(steal_counter + 1 /* me */, a, b, buffer);
 
