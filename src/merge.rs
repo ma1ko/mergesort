@@ -123,8 +123,6 @@ where
     T: Ord + Sync + Send + Copy,
 {
     assert_eq!(a.len() + b.len(), buffer.len());
-    // let mut iter = a.iter().merge(b.iter());
-    // let mut buffer = buffer.iter_mut();
     let mut progress = MergeProgress {
         left: 0,
         right: 0,

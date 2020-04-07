@@ -21,9 +21,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
     println!("Saving log");
-    log.save("test").expect("failed saving log");
+    // log.save("test").expect("failed saving log");
     println!("Saving svg");
-    log.save_svg("test.svg").expect("failed saving svg");
+    // log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
 pub fn mergesort<T>(data: &mut [T])
@@ -87,15 +87,21 @@ fn mergesort1<'a, T>(
         let elem_left = data.len();
         let steal_counter = steal::get_my_steal_count();
         if steal_counter > 0 && elem_left > 4096 {
+            // TODO: There's probably a smarter way to do this...
             let split_index = if index < total / 2 {
                 total / 2
             } else {
                 if index < total / 4 {
-                    continue;
+                    total / 4
                 } else {
-                    // that's more complex here...
-                    // data.len() / 4
-                    continue; // just ignore that steal
+                    if index < total / 8 {
+                        total / 8
+                    } else {
+                        // that's more complex here...
+                        // data.len() / 4
+                        // println!("Unable to steal {} from {}", index, total);
+                        continue; // just ignore that steal
+                    }
                 }
             };
             let (left_to, right_to) = to.split_at_mut(split_index - index);
@@ -124,7 +130,7 @@ fn mergesort1<'a, T>(
             return;
         }
         // Do some work: Split off and sort piece
-        let work_size = std::cmp::min(4096, elem_left);
+        let work_size = std::cmp::min(256, elem_left);
         let (piece, rest) = data.split_at_mut(work_size);
         data = rest;
         piece.sort();
