@@ -79,77 +79,76 @@ pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T])
     }
 }
 
-pub type InData = bool;
-pub struct Peekable<I: Iterator> {
-    iter: I,
-    /// Remember a peeked value, even if it was None.
-    peeked: Option<Option<I::Item>>,
+struct MergeProgress {
+    left: usize,
+    right: usize,
+    output: usize,
+    work_size: usize,
 }
-impl<I: Iterator> Peekable<I> {
-    pub fn peek(&mut self) -> Option<&I::Item> {
-        let iter = &mut self.iter;
-        self.peeked.get_or_insert_with(|| iter.next()).as_ref()
-    }
-}
-// Itertools::KMergeeBy
-pub struct MergeBy<I, J, F>
-where
-    I: Iterator,
-    J: Iterator<Item = I::Item>,
-{
-    a: Peekable<I>,
-    b: Peekable<J>,
-    _fused: Option<bool>,
-    _cmp: F,
-}
-pub struct MergeLte;
-pub type Merge<I, J> = MergeBy<I, J, MergeLte>;
 
+fn unsafe_manual_merge2<T>(progress: &mut MergeProgress, left: &[T], right: &[T], output: &mut [T])
+where
+    T: Ord + Copy,
+{
+    let mut left_index = progress.left;
+    let mut right_index = progress.right;
+    let (_, r) = output.split_at_mut(progress.output);
+    let (l, _) = r.split_at_mut(progress.work_size);
+    let output = l;
+    for o in output {
+        unsafe {
+            if left_index >= left.len() {
+                *o = *right.get_unchecked(right_index);
+                right_index += 1;
+            } else if right_index >= right.len() {
+                *o = *left.get_unchecked(left_index);
+                left_index += 1;
+            } else if left.get_unchecked(left_index) <= right.get_unchecked(right_index) {
+                *o = *left.get_unchecked(left_index);
+                left_index += 1;
+            } else {
+                *o = *right.get_unchecked(right_index);
+                right_index += 1;
+            };
+        }
+    }
+    progress.left = left_index;
+    progress.right = right_index;
+    progress.output = left_index + right_index;
+}
+
+pub type InData = bool;
 pub fn two_merge1<T>(a: &[T], b: &[T], buffer: &mut [T])
 where
     T: Ord + Sync + Send + Copy,
 {
     assert_eq!(a.len() + b.len(), buffer.len());
-    use itertools::Itertools;
-    let mut iter = a.iter().merge(b.iter());
-    let mut buffer = buffer.iter_mut();
+    // let mut iter = a.iter().merge(b.iter());
+    // let mut buffer = buffer.iter_mut();
+    let mut progress = MergeProgress {
+        left: 0,
+        right: 0,
+        output: 0,
+        work_size: 0,
+    };
     loop {
         let steal_counter = steal::get_my_steal_count();
-        if steal_counter == 0 || buffer.len() < MIN_WORK_SIZE {
+        let work_left = buffer.len() - progress.output;
+        if steal_counter == 0 || work_left < MIN_WORK_SIZE {
             // Do a part of the work
-            for _ in 0..std::cmp::min(MIN_WORK_SIZE, buffer.len()) {
-                *buffer.next().unwrap() = *iter.next().unwrap();
-            }
-            if buffer.len() == 0 {
+            progress.work_size = std::cmp::min(MIN_WORK_SIZE, work_left);
+            unsafe_manual_merge2(&mut progress, &a, &b, buffer);
+            if buffer.len() == progress.output {
                 return; // finished
             }
+            assert!(buffer.len() >= progress.output);
         } else {
-            // Someone is trying to steal. We need to recover the slices from the merging.
-            // Unsafe: If the MergeBy struct in Itertools changes, this need to be updated
-            let mut iter: Merge<std::slice::Iter<T>, std::slice::Iter<T>> =
-                unsafe { std::mem::transmute(iter) };
-
-            let mut a = iter.a.iter.as_slice();
-            let mut b = iter.b.iter.as_slice();
-
-            // We need to check if the iterator has peeked on any not-used elements yet
-            // if yes, we need to put them back in the slice
-            match iter.a.peeked.take() {
-                Some(Some(_)) => unsafe {
-                    a = put_back_item(a);
-                },
-                _ => (),
-            }
-            match iter.b.peeked.take() {
-                Some(Some(_)) => unsafe {
-                    b = put_back_item(b);
-                },
-                _ => (),
-            }
-            // after the transmute we probably shouldn't use the iterator anymore
-            drop(iter);
-            // That's the rest of the buffer
-            let buffer = buffer.into_slice();
+            let (_, r) = a.split_at(progress.left);
+            let a = r;
+            let (_, r) = b.split_at(progress.right);
+            let b = r;
+            let (_, r) = buffer.split_at_mut(progress.output);
+            let buffer = r;
             assert_eq!(a.len() + b.len(), buffer.len());
 
             fn spawn<T>(steal_counter: usize, a: &[T], b: &[T], buffer: &mut [T])
