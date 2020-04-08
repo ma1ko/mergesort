@@ -8,7 +8,7 @@ pub mod steal;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(22))
+        .take(2usize.pow(24))
         .map(|x: usize| x % 1_000_000)
         .collect();
     // let mut v: Vec<usize> = (0..2usize.pow(20)).into_iter().collect();
@@ -34,7 +34,7 @@ where
     unsafe { tmp_slice.set_len(data.len()) }
     let in_data = rayon::subgraph("sorting", tmp_slice.len(), || {
         let mut pieces = Vec::new();
-        mergesort1(data, &mut tmp_slice, &mut pieces, 0);
+        mergesort1(data, &mut tmp_slice, &mut pieces);
         assert!(
             pieces.len() == 1,
             format!(
@@ -79,41 +79,20 @@ fn mergesort1<'a, T>(
     mut data: &'a mut [T],
     mut to: &'a mut [T],
     mut pieces: &mut Vec<merge::MergeResult<'a, T>>,
-    mut index: usize, // if we have already done a part
+    // mut index: usize, // if we have already done a part
 ) where
     T: Ord + Sync + Send + Copy,
 {
     assert!(!data.is_empty());
     assert_eq!(data.len(), to.len());
-    // How much is currently sorted
-    // let mut index: usize = 0; //pieces.iter().map(|x| x.len()).sum::<usize>();
-    // Total amount of elements in the slice
-    let total = data.len() + index; // + index;
-                                    // println!("I have {} elements, plus {}", total, index);
-                                    // println!("I got {}", total);
-    assert!(index < total);
-
-    while index < total {
+    while !data.is_empty() {
         let elem_left = data.len();
         let steal_counter = steal::get_my_steal_count();
         if steal_counter > 0 && elem_left > 4096 {
-            // TODO: There's probably a smarter way to do this...
-            let split_index = if index < total / 2 {
-                total / 2
-            } else {
-                if index < total * 3 / 4 {
-                    // println!("Uneven split");
-                    index -= total / 2;
-                    total * 1 / 4
-                } else {
-                    if index < total * 7 / 8 {
-                        index -= total * 3 / 4;
-                        total * 1 / 8
-                    } else {
-                        continue; // just ignore that steal
-                    }
-                }
-            };
+            // let prev_split_index = total / elem_left.next_power_of_two();
+            let split_index = elem_left.next_power_of_two() / 2;
+            // println!("Cutting off {} / {} elements", split_index, elem_left);
+
             // always split from the back
             let (left_to, right_to) = to.split_at_mut(data.len() - split_index);
             let (a, b) = data.split_at_mut(data.len() - split_index);
@@ -123,13 +102,13 @@ fn mergesort1<'a, T>(
             let (mut pieces, mut other_pieces) = rayon::join(
                 move || {
                     rayon::subgraph("sorting", split_index, move || {
-                        mergesort1(a, left_to, pieces, index);
+                        mergesort1(a, left_to, pieces);
                         return pieces;
                     })
                 },
                 move || {
                     rayon::subgraph("sorting", split_index, move || {
-                        mergesort1(b, right_to, &mut other_pieces, 0);
+                        mergesort1(b, right_to, &mut other_pieces);
                         return other_pieces;
                     })
                 },
@@ -158,7 +137,7 @@ fn mergesort1<'a, T>(
         let (buffer, rest) = to.split_at_mut(work_size);
         to = rest;
         let merge = merge::MergeResult::new(piece, buffer, true);
-        index += work_size;
+        // index += work_size;
         pieces.push(merge);
         // try merging pieces
         merge_neighbors(&mut pieces);
