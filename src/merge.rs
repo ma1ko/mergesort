@@ -59,6 +59,11 @@ where
         }
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
+        if self.location().last().unwrap() <= other.location().first().unwrap() {
+            // it's already sorted
+            println!("Sorted"); // not sure if this actually works
+            return self;
+        }
         if self.in_data {
             // TODO: this could probably by simpler
             two_merge1(self.location(), other.location(), buffer);

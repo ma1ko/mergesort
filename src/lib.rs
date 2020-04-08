@@ -6,10 +6,55 @@ pub mod merge;
 pub mod rayon;
 pub mod steal;
 
+pub fn main_tuple() -> Result<(), Box<dyn std::error::Error>> {
+    let mut v: Vec<Tuple> = std::iter::repeat_with(rand::random)
+        .take(2usize.pow(20))
+        .enumerate()
+        .map(|(x, y): (usize, usize)| Tuple {
+            left: y % 10,
+            right: x,
+        })
+        .collect();
+    let pool = rayon::get_thread_pool();
+    let (_, log) = pool.logging_install(|| mergesort(&mut v));
+    assert!(v.windows(2).all(|w| w[0] <= w[1]));
+    assert!(v
+        .windows(2)
+        .all(|w| w[0] != w[1] || w[0].right <= w[1].right));
+    println!("Saving log");
+    // log.save("test").expect("failed saving log");
+    println!("Saving svg");
+    // log.save_svg("test.svg").expect("failed saving svg");
+    Ok(())
+}
+
+#[derive(Default, Copy, Clone, Debug)]
+struct Tuple {
+    left: usize,
+    right: usize,
+}
+impl PartialEq for Tuple {
+    fn eq(&self, other: &Tuple) -> bool {
+        return self.left == other.left;
+    }
+}
+impl Eq for Tuple {}
+
+use std::cmp::Ordering;
+impl PartialOrd for Tuple {
+    fn partial_cmp(&self, other: &Tuple) -> Option<Ordering> {
+        self.left.partial_cmp(&other.left)
+    }
+}
+impl Ord for Tuple {
+    fn cmp(&self, other: &Tuple) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(24))
-        .map(|x: usize| x % 1_000_000)
+        .take(2usize.pow(20))
+        .map(|x: usize| x % 2)
         .collect();
     // let mut v: Vec<usize> = (0..2usize.pow(20)).into_iter().collect();
     // v.reverse();
@@ -91,24 +136,23 @@ fn mergesort1<'a, T>(
         if steal_counter > 0 && elem_left > 4096 {
             // let prev_split_index = total / elem_left.next_power_of_two();
             let split_index = elem_left.next_power_of_two() / 2;
-            // println!("Cutting off {} / {} elements", split_index, elem_left);
 
             // always split from the back
             let (left_to, right_to) = to.split_at_mut(data.len() - split_index);
-            let (a, b) = data.split_at_mut(data.len() - split_index);
+            let (left_data, right_data) = data.split_at_mut(data.len() - split_index);
             // println!("Splitting {} in {} vs {}", total, a.len() + index, b.len());
             let mut other_pieces = Vec::new();
             // TODO: understand the lifetimes issues here
             let (mut pieces, mut other_pieces) = rayon::join(
                 move || {
                     rayon::subgraph("sorting", split_index, move || {
-                        mergesort1(a, left_to, pieces);
+                        mergesort1(left_data, left_to, pieces);
                         return pieces;
                     })
                 },
                 move || {
                     rayon::subgraph("sorting", split_index, move || {
-                        mergesort1(b, right_to, &mut other_pieces);
+                        mergesort1(right_data, right_to, &mut other_pieces);
                         return other_pieces;
                     })
                 },
@@ -126,7 +170,6 @@ fn mergesort1<'a, T>(
             }
             pieces.append(&mut other_pieces);
             merge_neighbors(&mut pieces);
-            //  assert_eq!(pieces.len(), 1);
             return;
         }
         // Do some work: Split off and sort piece
@@ -142,7 +185,6 @@ fn mergesort1<'a, T>(
         // try merging pieces
         merge_neighbors(&mut pieces);
     }
-    // assert_eq!(pieces.len(), 1);
     return;
 }
 // Mabye we can rewrite it a bit more like that
