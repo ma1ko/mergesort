@@ -1,5 +1,3 @@
-use crate::kmerge_impl;
-use crate::rayon;
 use crate::steal;
 const MIN_WORK_SIZE: usize = 1000;
 
