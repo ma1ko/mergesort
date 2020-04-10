@@ -5,9 +5,12 @@ pub mod merge;
 pub mod rayon;
 pub mod steal;
 
+/*
 pub fn main_tuple() -> Result<(), Box<dyn std::error::Error>> {
+    // test for stability with a Tuple where we only sort by the first element, then test if the
+    // second elements stayed in the same order
     let mut v: Vec<Tuple> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20))
+        .take(2usize.pow(24))
         .enumerate()
         .map(|(x, y): (usize, usize)| Tuple {
             left: y % 10,
@@ -23,9 +26,10 @@ pub fn main_tuple() -> Result<(), Box<dyn std::error::Error>> {
     println!("Saving log");
     log.save("test").expect("failed saving log");
     println!("Saving svg");
-    // log.save_svg("test.svg").expect("failed saving svg");
+    log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
+*/
 
 #[derive(Default, Copy, Clone, Debug)]
 struct Tuple {
@@ -52,8 +56,8 @@ impl Ord for Tuple {
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20))
-        .map(|x: usize| x % 2)
+        .take(2usize.pow(24))
+        .map(|x: usize| x % 1_000_000)
         .collect();
     // let mut v: Vec<usize> = (0..2usize.pow(20)).into_iter().collect();
     // v.reverse();
@@ -64,10 +68,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_, log) = pool.logging_install(|| mergesort(&mut v));
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
-    // println!("Saving log");
+    println!("Saving log");
     log.save("test").expect("failed saving log");
-    // println!("Saving svg");
-    // log.save_svg("test.svg").expect("failed saving svg");
+    println!("Saving svg");
+    log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
 pub fn mergesort<T>(data: &mut [T])
@@ -85,14 +89,7 @@ where
         mergesort.mergesort();
         assert!(
             mergesort.pieces.len() == 1,
-            format!(
-                "{:?}",
-                mergesort
-                    .pieces
-                    .iter()
-                    .map(|x| x.len())
-                    .collect::<Vec<usize>>()
-            )
+            format!("{:?}", mergesort.pieces_len())
         );
         mergesort.pieces[0].in_data
     });
@@ -104,11 +101,17 @@ where
     };
 }
 // from https://stackoverflow.com/questions/42162151/rust-error-e0495-using-split-at-mut-in-a-closure
-fn cut_off_piece<'a, T>(s: &'a mut &'a mut [T], mid: usize) -> &'a mut [T] {
+fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
     let tmp: &'a mut [T] = ::std::mem::replace(&mut *s, &mut []);
     let (left, right) = tmp.split_at_mut(mid);
     *s = right;
     left
+}
+fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
+    let tmp: &'a mut [T] = ::std::mem::replace(&mut *s, &mut []);
+    let (left, right) = tmp.split_at_mut(mid);
+    *s = left;
+    right
 }
 
 struct Mergesort<'a, T>
@@ -119,19 +122,13 @@ where
     to: &'a mut [T],
     pieces: Vec<merge::MergeResult<'a, T>>,
 }
-// fn mergesort_split<T>(data: &mut [T], to: &mut [T]) -> bool
-// where
-//     T: Ord + Sync + Send + Copy,
-// {
-//     true
-// }
 impl<'a, T> Mergesort<'a, T>
 where
     T: Ord + Sync + Send + Copy,
 {
-    // fn merge(&mut self) {
-    //     merge_neighbors(&mut self.pieces);
-    // }
+    fn pieces_len(&self) -> Vec<usize> {
+        self.pieces.iter().map(|x| x.len()).collect()
+    }
     fn merge(&mut self)
     where
         T: Ord + Sync + Send + Copy,
@@ -151,7 +148,6 @@ where
                 // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b));
                 a.merge(b);
             } else {
-                // println!("Couldn't merge {} and {}", a.len(), b.len());
                 break; // nothing to do
             }
         }
@@ -164,18 +160,14 @@ where
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
             if steal_counter > 0 && elem_left > 4096 {
-                // let prev_split_index = total / elem_left.next_power_of_two();
+                // we want to split off about half the slice, but also the right part needs to be a
+                // power of two, so we take the slice, find the next power of two, and give half of
+                // that to the other task. That means the other task will get more work.
                 let split_index = elem_left.next_power_of_two() / 2;
 
-                // https://stackoverflow.com/questions/42162151/rust-error-e0495-using-split-at-mut-in-a-closure
-                // always split from the back
-                let to: &'a mut [T] = std::mem::replace(&mut self.to, &mut []);
-                let (left_to, right_to) = to.split_at_mut(elem_left - split_index);
-                self.to = left_to;
-                // let right_to = cut_off_piece(&mut self.to, elem_left - split_index);
-                let data: &'a mut [T] = std::mem::replace(&mut self.data, &mut []);
-                let (left_data, right_data) = data.split_at_mut(elem_left - split_index);
-                self.data = left_data;
+                // split off a part for the other guy
+                let right_to = cut_off_right(&mut self.to, elem_left - split_index);
+                let right_data = cut_off_right(&mut self.data, elem_left - split_index);
                 // println!("Splitting {} in {} vs {}", total, a.len() + index, b.len());
 
                 // Other side
@@ -184,43 +176,27 @@ where
                     data: right_data,
                     to: right_to,
                 };
-                // TODO: understand the lifetimes issues here
-                let (_, _) = rayon::join(
+                rayon::join(
                     || {
-                        // rayon::subgraph("sorting", split_index, move || {
-                        self.mergesort();
-                        // })
+                        rayon::subgraph("sorting", split_index, || {
+                            self.mergesort();
+                        })
                     },
                     || {
-                        // rayon::subgraph("sorting", split_index, move || {
-                        other.mergesort();
-                        // })
+                        rayon::subgraph("sorting", split_index, || {
+                            other.mergesort();
+                        })
                     },
                 );
-                // we need to merge all those chunks now
-                // if !self.pieces.is_empty() && !other.pieces.is_empty() {
-                //     assert!(
-                //         self.pieces.last().unwrap().len() >= other.pieces.first().unwrap().len(),
-                //         format!(
-                //             "{:?} vs {:?}",
-                //             self.pieces.iter().map(|x| x.len()).collect::<Vec<usize>>(),
-                //             other.pieces.iter().map(|x| x.len()).collect::<Vec<usize>>()
-                //         )
-                //     );
-                // }
                 self.pieces.append(&mut other.pieces);
                 self.merge();
                 return;
             }
             // Do some work: Split off and sort piece
-            let work_size = std::cmp::min(256, elem_left);
-            let tmp: &'a mut [T] = std::mem::replace(&mut self.data, &mut []);
-            let (piece, rest) = tmp.split_at_mut(work_size);
-            self.data = rest;
+            let work_size = std::cmp::min(4096, elem_left);
+            let piece = cut_off_left(&mut self.data, work_size);
             piece.sort();
-            let tmp: &'a mut [T] = std::mem::replace(&mut self.to, &mut []);
-            let (buffer, rest) = tmp.split_at_mut(work_size);
-            self.to = rest;
+            let buffer = cut_off_left(&mut self.to, work_size);
             let merge = merge::MergeResult::new(piece, buffer, true);
             self.pieces.push(merge);
             // try merging pieces

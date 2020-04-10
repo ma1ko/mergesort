@@ -1,15 +1,7 @@
+use crate::rayon;
 use crate::steal;
-const MIN_WORK_SIZE: usize = 1000;
+const MIN_WORK_SIZE: usize = 5000;
 
-// The slice has one more item in front you want to take
-pub unsafe fn put_back_item<T>(slice: &[T]) -> &[T] {
-    // we now get the head by constructing a slice that's one element larger at
-    // the front
-    let start = slice.as_ptr();
-    let start = start.offset(-1);
-    let len = slice.len() + 1;
-    std::slice::from_raw_parts(start, len)
-}
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>
 where
@@ -38,40 +30,29 @@ where
             self.buffer
         }
     }
-    pub fn len(self: &'a Self) -> usize {
+    pub fn len(self: &Self) -> usize {
         return self.data.len();
     }
 
-    pub fn merge(mut self: &mut Self, other: MergeResult<T>) -> &mut Self {
+    pub fn merge(mut self: &mut Self, other: MergeResult<T>) {
         assert!(self.in_data == other.in_data);
-        unsafe {
-            // be sure that the next block as actually after this block
-            assert_eq!(
-                self.data.as_ptr().offset(self.data.len() as isize),
-                other.data.as_ptr()
-            );
-            assert_eq!(
-                self.buffer.as_ptr().offset(self.buffer.len() as isize),
-                other.buffer.as_ptr()
-            );
-        }
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
         if self.location().last().unwrap() <= other.location().first().unwrap() {
             // it's already sorted
             println!("Sorted"); // not sure if this actually works
-            return self;
+            return;
         }
-        if self.in_data {
-            // TODO: this could probably by simpler
-            two_merge1(self.location(), other.location(), buffer);
-        } else {
-            two_merge1(self.location(), other.location(), data);
-        }
+        let mut merge = Merge {
+            left: &mut self.location(),
+            right: &mut other.location(),
+            to: if self.in_data { buffer } else { data },
+            progress: Default::default(),
+        };
+        merge.two_merge();
         self.in_data = !self.in_data;
         self.data = data;
         self.buffer = buffer;
-        self
     }
 }
 pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T]) -> &'c mut [T] {
@@ -82,6 +63,7 @@ pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T])
     }
 }
 
+#[derive(Debug, Default)]
 struct MergeProgress {
     left: usize,
     right: usize,
@@ -89,6 +71,7 @@ struct MergeProgress {
     work_size: usize,
 }
 
+// Merge two slices, tracking progress. We do work_size items, then return
 fn unsafe_manual_merge2<T>(progress: &mut MergeProgress, left: &[T], right: &[T], output: &mut [T])
 where
     T: Ord + Copy,
@@ -119,78 +102,110 @@ where
     progress.right = right_index;
     progress.output = left_index + right_index;
 }
-
-pub type InData = bool;
-pub fn two_merge1<T>(a: &[T], b: &[T], buffer: &mut [T])
+fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
+    let tmp: &'a mut [T] = ::std::mem::replace(&mut *s, &mut []);
+    let (left, right) = tmp.split_at_mut(mid);
+    *s = left;
+    right
+}
+pub struct Merge<'a, T>
 where
     T: Ord + Sync + Send + Copy,
 {
-    assert_eq!(a.len() + b.len(), buffer.len());
-    let mut progress = MergeProgress {
-        left: 0,
-        right: 0,
-        output: 0,
-        work_size: 0,
-    };
-    loop {
-        let steal_counter = steal::get_my_steal_count();
-        let work_left = buffer.len() - progress.output;
-        if steal_counter == 0 || work_left < MIN_WORK_SIZE {
-            // Do a part of the work
-            progress.work_size = std::cmp::min(MIN_WORK_SIZE, work_left);
-            unsafe_manual_merge2(&mut progress, &a, &b, buffer);
-            if buffer.len() == progress.output {
-                return; // finished
-            }
-            assert!(buffer.len() >= progress.output);
-        } else {
-            let (_, r) = a.split_at(progress.left);
-            let a = r;
-            let (_, r) = b.split_at(progress.right);
-            let b = r;
-            let (_, r) = buffer.split_at_mut(progress.output);
-            let buffer = r;
-            assert_eq!(a.len() + b.len(), buffer.len());
-
-            fn spawn<T>(steal_counter: usize, a: &[T], b: &[T], buffer: &mut [T])
-            where
-                T: Ord + Send + Sync + Copy,
-            {
-                // Split the inputs and buffer into steal_counter subslices
-                // the longer slice
-                let max_slice = if a.len() > b.len() { a } else { b };
-
-                if steal_counter == 1 || max_slice.len() < MIN_WORK_SIZE {
-                    // finished splitting, let's just merge
-                    rayon_logs::subgraph("merging", buffer.len(), || {
-                        two_merge1(a, b, buffer);
-                    });
-                    return;
+    left: &'a [T],
+    right: &'a [T],
+    to: &'a mut [T],
+    progress: MergeProgress,
+}
+impl<'a, T> Merge<'a, T>
+where
+    T: Ord + Sync + Send + Copy,
+{
+    pub fn two_merge(&mut self) {
+        assert_eq!(self.left.len() + self.right.len(), self.to.len());
+        self.progress = MergeProgress {
+            left: 0,
+            right: 0,
+            output: 0,
+            work_size: 0,
+        };
+        let mut progress = &mut self.progress;
+        loop {
+            let steal_counter = steal::get_my_steal_count();
+            let work_left = self.to.len() - progress.output;
+            if steal_counter == 0 || work_left < MIN_WORK_SIZE {
+                // Do a part of the work
+                progress.work_size = std::cmp::min(MIN_WORK_SIZE, work_left);
+                unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
+                if self.to.len() == progress.output {
+                    return; // finished
                 }
+                assert!(self.to.len() >= progress.output);
+            } else {
+                let (_, r) = self.left.split_at(progress.left);
+                let a = r;
+                let (_, r) = self.right.split_at(progress.right);
+                let b = r;
+                let (_, r) = self.to.split_at_mut(progress.output);
+                let buffer = r;
+                assert_eq!(a.len() + b.len(), buffer.len());
 
-                // we split the maximum slice an len / stealers element.
-                // For the other slice, we split at the same element.
-                let split = max_slice.len() / steal_counter;
-                // the element to split
-                let split_elem = max_slice[split];
-
-                // find the splitting points in all splices
-                let index_a = split_for_merge(a, &|a, b| a < b, &split_elem);
-                let index_b = split_for_merge(b, &|a, b| a < b, &split_elem);
-                let (left_a, right_a) = a.split_at(index_a);
-                let (left_b, right_b) = b.split_at(index_b);
-
-                let (b1, b2) = buffer.split_at_mut(left_a.len() + left_b.len());
-
-                rayon_logs::join(
-                    || spawn(steal_counter - 1, right_a, right_b, b2),
-                    || rayon_logs::subgraph("merging", b1.len(), || two_merge1(left_a, left_b, b1)),
-                );
+                self.spawn(steal_counter + 1 /* me */);
+                return;
             }
-            spawn(steal_counter + 1 /* me */, a, b, buffer);
+        }
+    }
+    fn spawn(&mut self, steal_counter: usize) {
+        // Split the inputs and buffer into steal_counter subslices
+        // the longer slice
+        let left = &self.left;
+        let right = &self.right;
+        let max_slice = if left.len() > right.len() {
+            left
+        } else {
+            right
+        };
 
+        //recursive base case: just sort
+        if steal_counter == 1 || max_slice.len() < MIN_WORK_SIZE {
+            // finished splitting, let's just merge
+            rayon::subgraph("merging", self.to.len(), || {
+                self.two_merge();
+            });
             return;
         }
+
+        // we split the maximum slice an len / stealers element.
+        // For the other slice, we split at the same element.
+        let split = max_slice.len() / steal_counter;
+        // the element to split
+        let split_elem = max_slice[split];
+
+        // find the splitting points in all splices
+        let index_left = split_for_merge(left, &|a, b| a < b, &split_elem);
+        let index_right = split_for_merge(right, &|a, b| a < b, &split_elem);
+        let (me_left, other_left) = left.split_at(index_left);
+        let (me_right, other_right) = right.split_at(index_right);
+        /*        [ for me    | other task]
+         * left:  [me_left  | other_left]
+         * right: [me_right | other_right]
+         * to:    [me_to    | other_to]
+         */
+
+        let other_to = cut_off_right(&mut self.to, me_left.len() + me_right.len());
+        let mut other = Merge {
+            left: &other_left,
+            right: &other_right,
+            to: other_to,
+            progress: Default::default(),
+        };
+        self.left = me_left;
+        self.right = me_right;
+
+        rayon::join(
+            || self.spawn(steal_counter - 1),
+            || rayon::subgraph("merging", other.to.len(), || other.two_merge()),
+        );
     }
 }
 
