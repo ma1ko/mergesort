@@ -5,7 +5,7 @@ const MIN_WORK_SIZE: usize = 5000;
 pub type RunTask = dyn FnMut() -> () + Sync + Send;
 pub trait Task: Send + Sync {
     // run self *and* me, or return false if you can't
-    fn run(&mut self, me: Option<&mut RunTask>) -> bool;
+    fn run(&mut self) -> bool;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -16,18 +16,25 @@ where
     pub data: &'a mut [T], // that's where it starts and should be after it's merged
     pub buffer: &'a mut [T], // that's where it temporarily might be
     pub in_data: bool,     // true if the sorted data is in the data, false if it's buffer
+    pub offset: usize,     // index in total
 }
 
 impl<'a, T> MergeResult<'a, T>
 where
     T: Ord + Sync + Send + Copy,
 {
-    pub fn new(data: &'a mut [T], buffer: &'a mut [T], in_data: bool) -> MergeResult<'a, T> {
+    pub fn new(
+        data: &'a mut [T],
+        buffer: &'a mut [T],
+        in_data: bool,
+        offset: usize,
+    ) -> MergeResult<'a, T> {
         assert_eq!(data.len(), buffer.len());
         MergeResult {
             data,
             buffer,
             in_data,
+            offset: offset,
         }
     }
     pub fn location(self: &'a Self) -> &'a [T] {
@@ -41,7 +48,7 @@ where
         return self.data.len();
     }
 
-    pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&dyn Task>) {
+    pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
         assert!(self.in_data == other.in_data);
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
@@ -50,7 +57,7 @@ where
         //     println!("Sorted"); // not sure if this actually works (probably not)
         //     return;
         // }
-        let mut merge = Merge {
+        let mut merge: Merge<T> = Merge {
             left: &mut self.location(),
             right: &mut other.location(),
             to: if self.in_data { buffer } else { data },
@@ -116,7 +123,7 @@ fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
     *s = left;
     right
 }
-pub struct Merge<'a, T>
+pub struct Merge<'a, 'b, T>
 where
     T: Ord + Sync + Send + Copy,
 {
@@ -124,7 +131,7 @@ where
     pub right: &'a [T],
     pub to: &'a mut [T],
     pub progress: MergeProgress,
-    pub f: Option<&'a dyn Task>,
+    pub f: Option<&'b mut dyn Task>,
 }
 // impl<'a, T> Task for Merge<'a, T>
 // where
@@ -138,7 +145,7 @@ where
 //         return false;
 //     }
 // }
-impl<'a, T> Merge<'a, T>
+impl<'a, 'b, T> Merge<'a, 'b, T>
 where
     T: Ord + Sync + Send + Copy,
 {
@@ -165,6 +172,13 @@ where
                 let (_, r) = self.to.split_at_mut(progress.output);
                 let buffer = r;
                 assert_eq!(a.len() + b.len(), buffer.len());
+
+                // try split the mergesort
+                let mut f = std::mem::replace(&mut self.f, None);
+                if let Some(f) = &mut f {
+                    rayon::join(|| self.spawn(steal_counter), || f.run());
+                    return;
+                };
 
                 self.spawn(steal_counter + 1 /* me */);
                 return;

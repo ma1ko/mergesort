@@ -56,7 +56,7 @@ impl Ord for Tuple {
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(24))
+        .take(2usize.pow(20))
         .map(|x: usize| x % 1_000_000)
         .collect();
     // let mut v: Vec<usize> = (0..2usize.pow(20)).into_iter().collect();
@@ -68,10 +68,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_, log) = pool.logging_install(|| mergesort(&mut v));
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
-    println!("Saving log");
-    log.save("test").expect("failed saving log");
-    println!("Saving svg");
-    log.save_svg("test.svg").expect("failed saving svg");
+    // println!("Saving log");
+    // log.save("test").expect("failed saving log");
+    // println!("Saving svg");
+    // log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
 pub fn mergesort<T>(data: &mut [T])
@@ -85,12 +85,17 @@ where
             data: data,
             to: &mut tmp_slice,
             pieces: Vec::new(),
+            offset: 0,
         };
         mergesort.mergesort();
-        assert!(
-            mergesort.pieces.len() == 1,
-            format!("{:?}", mergesort.pieces_len())
-        );
+
+        // println!("Result: {:?}", mergesort.pieces_len());
+        mergesort.merge_all();
+
+        // assert!(
+        //     mergesort.pieces.len() == 1,
+        //     format!("{:?}", mergesort.pieces_len())
+        // );
         mergesort.pieces[0].in_data
     });
 
@@ -121,42 +126,80 @@ where
     data: &'a mut [T],
     to: &'a mut [T],
     pieces: Vec<merge::MergeResult<'a, T>>,
+    offset: usize,
 }
 impl<'a, T> Mergesort<'a, T>
 where
     T: Ord + Sync + Send + Copy,
 {
     fn pieces_len(&self) -> Vec<usize> {
+        // mostly for debugging
         self.pieces.iter().map(|x| x.len()).collect()
+    }
+    fn check(&self) {
+        // self.pieces.windows(2).for_each(|v| unsafe {
+        //     let ptr1 = v[0].data.as_ptr();
+        //     assert_eq!(ptr1.add(v[0].data.len()) as *const T, v[1].data.as_ptr());
+        // });
+        // let lengths = self.pieces_len();
+        // let mut iter = lengths.iter();
+        // let first = iter.next();
+        // let _ = iter.scan(first, |state, n| {
+        //     assert!(state.unwrap() >= n);
+        //     Some(state.unwrap() + n)
+        // });
+        // assert!(
+        //     self.pieces_len().windows(2).all(|w| w[0] >= w[1]),
+        //     format!("After:{:?}", self.pieces_len(),)
+        // );
     }
     fn merge(&mut self)
     where
         T: Ord + Sync + Send + Copy,
     {
+        // self.check();
         while self.pieces.len() >= 2 {
-            // to merge we need at least two parts
+            // to merge we need at least two parts, they need to be same size
             let len = self.pieces.len();
             let a = &self.pieces[len - 2];
             let b = &self.pieces[len - 1];
-            if a.len() == b.len() {
+            if a.len() == b.len() && a.offset % (a.len() * 2) == 0 {
                 // we can merge, remove last item
-                let b = self.pieces.pop().unwrap();
+                let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 // let a = &mut self.pieces.last_mut().unwrap();
-                // we need to temporarily remevove this item to ovoid merge issues
-                let mut a = self.pieces.pop().unwrap();
+                // we need to temporarily remove this item to avoid merge issues
+                let mut a: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 assert_eq!(a.in_data, b.in_data);
                 assert_eq!(a.len(), b.len());
+                assert_eq!(a.offset + a.len(), b.offset);
 
+                assert_eq!(a.offset % (a.len() * 2), 0);
+                let pieces = std::mem::replace(&mut self.pieces, Vec::new());
                 a.merge(b, Some(self));
+                // self.check();
+                let mut new = std::mem::replace(&mut self.pieces, pieces);
                 self.pieces.push(a);
+                self.merge();
+                self.pieces.append(&mut new);
+                self.merge_all();
+                self.check();
             } else {
                 break; // nothing to do
             }
         }
     }
+    fn merge_all(&mut self) {
+        if self.pieces.len() >= 1 {
+            let x = self.pieces.pop().unwrap();
+            self.merge_all();
+            self.pieces.push(x);
+            self.merge();
+        }
+    }
     fn split(self: &mut Self) -> bool {
+        self.check();
         let elem_left = self.data.len();
-        if elem_left < 4096 {
+        if elem_left < 256 {
             return false;
         }
         // we want to split off about half the slice, but also the right part needs to be a
@@ -174,6 +217,7 @@ where
             pieces: Vec::new(),
             data: right_data,
             to: right_to,
+            offset: self.offset + (elem_left - split_index),
         };
         rayon::join(
             || {
@@ -187,8 +231,13 @@ where
                 })
             },
         );
+        // self.check();
+        // other.merge_all(); // Optional, will probably make stuff shorter
+        // other.check();
+        // assert!(other.pieces.len() == 1);
         self.pieces.append(&mut other.pieces);
-        self.merge();
+        // self.merge(); // I shouldn't do that here
+        // self.check();
         return true;
     }
 
@@ -199,20 +248,23 @@ where
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
             // TODO: actually use the count, don't just split in two
-            if steal_counter > 0 && elem_left > 4096 {
+            if steal_counter > 0 && elem_left > 256 {
                 self.split();
+                // self.merge();
                 return;
             }
             // Do some work: Split off and sort piece
-            let work_size = std::cmp::min(4096, elem_left);
+            let work_size = std::cmp::min(256, elem_left);
             let piece = cut_off_left(&mut self.data, work_size);
             piece.sort();
             let buffer = cut_off_left(&mut self.to, work_size);
-            let merge = merge::MergeResult::new(piece, buffer, true);
+            let merge = merge::MergeResult::new(piece, buffer, true, self.offset);
+            self.offset += 256;
             self.pieces.push(merge);
             // try merging pieces
             self.merge();
         }
+        // self.merge();
         return;
     }
 }
@@ -220,15 +272,24 @@ impl<'a, T> merge::Task for Mergesort<'a, T>
 where
     T: Ord + Sync + Send + Copy,
 {
-    fn run(&mut self, me: Option<&mut merge::RunTask>) -> bool {
-        if me.is_none() {
-            return false;
-        };
-        if self.data.len() < 4096 {
+    fn run(&mut self) -> bool {
+        if self.data.len() < 256 {
             return false;
         }
-        rayon::join(|| self.mergesort(), || me.unwrap());
-        return true; // finished
+        self.check();
+        let pieces = std::mem::replace(&mut self.pieces, Vec::new());
+
+        self.split();
+        // self.check();
+        // assert_eq!(self.pieces.len(), 1);
+        // println!("{:?}", self.pieces_len());
+        let mut new = std::mem::replace(&mut self.pieces, pieces);
+        // println!("Plus {:?}", self.pieces_len());
+        self.pieces.append(&mut new);
+        // self.check();
+
+        // self.merge();
+        return true;
     }
 }
 // Mabye we can rewrite it a bit more like that
