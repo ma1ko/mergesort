@@ -2,6 +2,12 @@ use crate::rayon;
 use crate::steal;
 const MIN_WORK_SIZE: usize = 5000;
 
+pub type RunTask = dyn FnMut() -> () + Sync + Send;
+pub trait Task: Send + Sync {
+    // run self *and* me, or return false if you can't
+    fn run(&mut self, me: Option<&mut RunTask>) -> bool;
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>
 where
@@ -11,6 +17,7 @@ where
     pub buffer: &'a mut [T], // that's where it temporarily might be
     pub in_data: bool,     // true if the sorted data is in the data, false if it's buffer
 }
+
 impl<'a, T> MergeResult<'a, T>
 where
     T: Ord + Sync + Send + Copy,
@@ -34,20 +41,21 @@ where
         return self.data.len();
     }
 
-    pub fn merge(mut self: &mut Self, other: MergeResult<T>) {
+    pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&dyn Task>) {
         assert!(self.in_data == other.in_data);
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
-        if self.location().last().unwrap() <= other.location().first().unwrap() {
-            // it's already sorted
-            println!("Sorted"); // not sure if this actually works
-            return;
-        }
+        // if self.location().last().unwrap() <= other.location().first().unwrap() {
+        //     // it's already sorted
+        //     println!("Sorted"); // not sure if this actually works (probably not)
+        //     return;
+        // }
         let mut merge = Merge {
             left: &mut self.location(),
             right: &mut other.location(),
             to: if self.in_data { buffer } else { data },
             progress: Default::default(),
+            f: f,
         };
         merge.two_merge();
         self.in_data = !self.in_data;
@@ -64,7 +72,7 @@ pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T])
 }
 
 #[derive(Debug, Default)]
-struct MergeProgress {
+pub struct MergeProgress {
     left: usize,
     right: usize,
     output: usize,
@@ -112,23 +120,31 @@ pub struct Merge<'a, T>
 where
     T: Ord + Sync + Send + Copy,
 {
-    left: &'a [T],
-    right: &'a [T],
-    to: &'a mut [T],
-    progress: MergeProgress,
+    pub left: &'a [T],
+    pub right: &'a [T],
+    pub to: &'a mut [T],
+    pub progress: MergeProgress,
+    pub f: Option<&'a dyn Task>,
 }
+// impl<'a, T> Task for Merge<'a, T>
+// where
+//     T: Ord + Sync + Send + Copy,
+// {
+//     fn run(&mut self, me: Option<&mut dyn Task>) -> bool {
+//         if me.is_none() {
+//             return false;
+//         }
+//         unimplemented!(); // TODO
+//         return false;
+//     }
+// }
 impl<'a, T> Merge<'a, T>
 where
     T: Ord + Sync + Send + Copy,
 {
     pub fn two_merge(&mut self) {
         assert_eq!(self.left.len() + self.right.len(), self.to.len());
-        self.progress = MergeProgress {
-            left: 0,
-            right: 0,
-            output: 0,
-            work_size: 0,
-        };
+        self.progress = Default::default();
         let mut progress = &mut self.progress;
         loop {
             let steal_counter = steal::get_my_steal_count();
@@ -198,6 +214,7 @@ where
             right: &other_right,
             to: other_to,
             progress: Default::default(),
+            f: None,
         };
         self.left = me_left;
         self.right = me_right;

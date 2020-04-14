@@ -139,18 +139,57 @@ where
             let a = &self.pieces[len - 2];
             let b = &self.pieces[len - 1];
             if a.len() == b.len() {
-                // we can merge
-                let b = self.pieces.pop().unwrap(); //remove the last
-                let a = &mut self.pieces.last_mut().unwrap();
+                // we can merge, remove last item
+                let b = self.pieces.pop().unwrap();
+                // let a = &mut self.pieces.last_mut().unwrap();
+                // we need to temporarily remevove this item to ovoid merge issues
+                let mut a = self.pieces.pop().unwrap();
                 assert_eq!(a.in_data, b.in_data);
                 assert_eq!(a.len(), b.len());
 
-                // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b));
-                a.merge(b);
+                a.merge(b, Some(self));
+                self.pieces.push(a);
             } else {
                 break; // nothing to do
             }
         }
+    }
+    fn split(self: &mut Self) -> bool {
+        let elem_left = self.data.len();
+        if elem_left < 4096 {
+            return false;
+        }
+        // we want to split off about half the slice, but also the right part needs to be a
+        // power of two, so we take the slice, find the next power of two, and give half of
+        // that to the other task. That means the other task will get more work.
+        let split_index = elem_left.next_power_of_two() / 2;
+
+        // split off a part for the other guy
+        let right_to = cut_off_right(&mut self.to, elem_left - split_index);
+        let right_data = cut_off_right(&mut self.data, elem_left - split_index);
+        // println!("Splitting {} in {} vs {}", total, a.len() + index, b.len());
+
+        // Other side
+        let mut other: Mergesort<'a, T> = Mergesort {
+            pieces: Vec::new(),
+            data: right_data,
+            to: right_to,
+        };
+        rayon::join(
+            || {
+                rayon::subgraph("sorting", split_index, || {
+                    self.mergesort();
+                })
+            },
+            || {
+                rayon::subgraph("sorting", split_index, || {
+                    other.mergesort();
+                })
+            },
+        );
+        self.pieces.append(&mut other.pieces);
+        self.merge();
+        return true;
     }
 
     fn mergesort(self: &mut Self) {
@@ -159,37 +198,9 @@ where
         while !self.data.is_empty() {
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
+            // TODO: actually use the count, don't just split in two
             if steal_counter > 0 && elem_left > 4096 {
-                // we want to split off about half the slice, but also the right part needs to be a
-                // power of two, so we take the slice, find the next power of two, and give half of
-                // that to the other task. That means the other task will get more work.
-                let split_index = elem_left.next_power_of_two() / 2;
-
-                // split off a part for the other guy
-                let right_to = cut_off_right(&mut self.to, elem_left - split_index);
-                let right_data = cut_off_right(&mut self.data, elem_left - split_index);
-                // println!("Splitting {} in {} vs {}", total, a.len() + index, b.len());
-
-                // Other side
-                let mut other: Mergesort<'a, T> = Mergesort {
-                    pieces: Vec::new(),
-                    data: right_data,
-                    to: right_to,
-                };
-                rayon::join(
-                    || {
-                        rayon::subgraph("sorting", split_index, || {
-                            self.mergesort();
-                        })
-                    },
-                    || {
-                        rayon::subgraph("sorting", split_index, || {
-                            other.mergesort();
-                        })
-                    },
-                );
-                self.pieces.append(&mut other.pieces);
-                self.merge();
+                self.split();
                 return;
             }
             // Do some work: Split off and sort piece
@@ -203,6 +214,21 @@ where
             self.merge();
         }
         return;
+    }
+}
+impl<'a, T> merge::Task for Mergesort<'a, T>
+where
+    T: Ord + Sync + Send + Copy,
+{
+    fn run(&mut self, me: Option<&mut merge::RunTask>) -> bool {
+        if me.is_none() {
+            return false;
+        };
+        if self.data.len() < 4096 {
+            return false;
+        }
+        rayon::join(|| self.mergesort(), || me.unwrap());
+        return true; // finished
     }
 }
 // Mabye we can rewrite it a bit more like that
