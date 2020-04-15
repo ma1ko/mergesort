@@ -90,12 +90,12 @@ where
         mergesort.mergesort();
 
         // println!("Result: {:?}", mergesort.pieces_len());
-        mergesort.merge_all();
+        // mergesort.merge_all();
 
-        // assert!(
-        //     mergesort.pieces.len() == 1,
-        //     format!("{:?}", mergesort.pieces_len())
-        // );
+        assert!(
+            mergesort.pieces.len() == 1,
+            format!("{:?}", mergesort.pieces_len())
+        );
         mergesort.pieces[0].in_data
     });
 
@@ -157,7 +157,6 @@ where
     where
         T: Ord + Sync + Send + Copy,
     {
-        // self.check();
         while self.pieces.len() >= 2 {
             // to merge we need at least two parts, they need to be same size
             let len = self.pieces.len();
@@ -165,37 +164,88 @@ where
             let b = &self.pieces[len - 1];
             if a.len() == b.len() && a.offset % (a.len() * 2) == 0 {
                 // we can merge, remove last item
+                assert!(
+                    a.offset % (a.len() * 2) == 0,
+                    format!(
+                        "Index: {}, X: {:?}, {}, {}",
+                        self.pieces.len(),
+                        self.pieces_len(),
+                        a.offset,
+                        b.offset
+                    )
+                );
+
                 let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 // let a = &mut self.pieces.last_mut().unwrap();
                 // we need to temporarily remove this item to avoid merge issues
                 let mut a: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
+                let index = self.pieces.len();
                 assert_eq!(a.in_data, b.in_data);
-                assert_eq!(a.len(), b.len());
                 assert_eq!(a.offset + a.len(), b.offset);
 
-                assert_eq!(a.offset % (a.len() * 2), 0);
-                let pieces = std::mem::replace(&mut self.pieces, Vec::new());
+                // a.merge(b, None);
+
                 a.merge(b, Some(self));
-                // self.check();
-                let mut new = std::mem::replace(&mut self.pieces, pieces);
-                self.pieces.push(a);
-                self.merge();
-                self.pieces.append(&mut new);
-                self.merge_all();
-                self.check();
+                self.pieces.insert(index, a);
+                // We inserted the element, we need to check with the neighbors
+                if index != self.pieces.len() - 1 {
+                    // println!("Merging: {:?} at {}", self.pieces_len(), index);
+                    self.merge_index(index);
+                }
+            // assert!(
+            //     self.pieces_len().windows(2).all(|w| w[0] >= w[1]),
+            //     format!("{:?}", self.pieces_len())
+            // );
             } else {
                 break; // nothing to do
             }
         }
     }
-    fn merge_all(&mut self) {
-        if self.pieces.len() >= 1 {
-            let x = self.pieces.pop().unwrap();
-            self.merge_all();
-            self.pieces.push(x);
-            self.merge();
+    fn merge_index(&mut self, mut index: usize) {
+        // println!("Index: {}, Before: {:?}", index, self.pieces_len());
+        // forwards
+        let mut change = true;
+        while change {
+            change = false;
+            let a = &self.pieces[index];
+            // let b = &self.pieces[index + 1];
+            if index < self.pieces.len() - 1
+                && a.len() == self.pieces[index + 1].len()
+                && a.offset % (a.len() * 2) == 0
+            {
+                change = true;
+                let b = self.pieces.remove(index + 1);
+                let a = &mut self.pieces[index];
+                assert_eq!(a.offset % (a.len() * 2), 0);
+                assert_eq!(a.offset + a.len(), b.offset);
+                assert_eq!(a.in_data, b.in_data);
+                a.merge(b, None);
+            } else {
+                if index > 0
+                    && a.len() == self.pieces[index - 1].len()
+                    && a.offset % (a.len() * 2) != 0
+                {
+                    change = true;
+                    let b = self.pieces.remove(index);
+                    let a = &mut self.pieces[index - 1];
+                    assert_eq!(a.offset % (a.len() * 2), 0);
+                    assert_eq!(a.offset + a.len(), b.offset);
+                    assert_eq!(a.in_data, b.in_data);
+                    a.merge(b, None);
+                    index -= 1;
+                }
+            }
         }
+        // println!("Index: {}, After: {:?}", index, self.pieces_len());
     }
+    // fn merge_all(&mut self) {
+    //     if self.pieces.len() >= 1 {
+    //         let x = self.pieces.pop().unwrap();
+    //         self.merge_all();
+    //         self.pieces.push(x);
+    //         self.merge();
+    //     }
+    // }
     fn split(self: &mut Self) -> bool {
         self.check();
         let elem_left = self.data.len();
@@ -235,9 +285,14 @@ where
         // other.merge_all(); // Optional, will probably make stuff shorter
         // other.check();
         // assert!(other.pieces.len() == 1);
+        other.merge();
+        assert!(
+            other.pieces.len() == 1,
+            format!("Fail:{:?}", other.pieces_len())
+        );
+
         self.pieces.append(&mut other.pieces);
-        // self.merge(); // I shouldn't do that here
-        // self.check();
+        self.merge(); // Other has one element, we can try to merge that to self
         return true;
     }
 
@@ -264,7 +319,6 @@ where
             // try merging pieces
             self.merge();
         }
-        // self.merge();
         return;
     }
 }
@@ -276,10 +330,13 @@ where
         if self.data.len() < 256 {
             return false;
         }
-        self.check();
+        // self.check();
         let pieces = std::mem::replace(&mut self.pieces, Vec::new());
 
+        // println!("len: {}", self.data.len());
+        // assert!(false);
         self.split();
+        self.check();
         // self.check();
         // assert_eq!(self.pieces.len(), 1);
         // println!("{:?}", self.pieces_len());

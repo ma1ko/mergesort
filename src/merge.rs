@@ -52,11 +52,6 @@ where
         assert!(self.in_data == other.in_data);
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
-        // if self.location().last().unwrap() <= other.location().first().unwrap() {
-        //     // it's already sorted
-        //     println!("Sorted"); // not sure if this actually works (probably not)
-        //     return;
-        // }
         let mut merge: Merge<T> = Merge {
             left: &mut self.location(),
             right: &mut other.location(),
@@ -156,7 +151,8 @@ where
         loop {
             let steal_counter = steal::get_my_steal_count();
             let work_left = self.to.len() - progress.output;
-            if steal_counter == 0 || work_left < MIN_WORK_SIZE {
+            if steal_counter == 0 {
+                // || work_left < MIN_WORK_SIZE {
                 // Do a part of the work
                 progress.work_size = std::cmp::min(MIN_WORK_SIZE, work_left);
                 unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
@@ -165,6 +161,7 @@ where
                 }
                 assert!(self.to.len() >= progress.output);
             } else {
+                // we got stolen, split off the part that is already finished
                 let (_, r) = self.left.split_at(progress.left);
                 let a = r;
                 let (_, r) = self.right.split_at(progress.right);
@@ -173,13 +170,17 @@ where
                 let buffer = r;
                 assert_eq!(a.len() + b.len(), buffer.len());
 
-                // try split the mergesort
+                //  try split the mergesort
                 let mut f = std::mem::replace(&mut self.f, None);
                 if let Some(f) = &mut f {
-                    rayon::join(|| self.spawn(steal_counter), || f.run());
+                    f.run();
+                    self.spawn(steal_counter);
+                    // rayon::join(|| self.spawn(steal_counter), || f.run());
                     return;
                 };
+                let _ = std::mem::replace(&mut self.f, f);
 
+                // didn't work, just split the merge
                 self.spawn(steal_counter + 1 /* me */);
                 return;
             }
