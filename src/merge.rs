@@ -15,7 +15,7 @@ where
 {
     pub data: &'a mut [T], // that's where it starts and should be after it's merged
     pub buffer: &'a mut [T], // that's where it temporarily might be
-    pub in_data: bool,     // true if the sorted data is in the data, false if it's buffer
+    pub in_data: bool,     // true if the sorted data is in the data, false if it's in the buffer
     pub offset: usize,     // index in total
 }
 

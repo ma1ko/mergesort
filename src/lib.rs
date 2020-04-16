@@ -136,22 +136,23 @@ where
         // mostly for debugging
         self.pieces.iter().map(|x| x.len()).collect()
     }
-    fn check(&self) {
-        // self.pieces.windows(2).for_each(|v| unsafe {
-        //     let ptr1 = v[0].data.as_ptr();
-        //     assert_eq!(ptr1.add(v[0].data.len()) as *const T, v[1].data.as_ptr());
-        // });
-        // let lengths = self.pieces_len();
-        // let mut iter = lengths.iter();
-        // let first = iter.next();
-        // let _ = iter.scan(first, |state, n| {
-        //     assert!(state.unwrap() >= n);
-        //     Some(state.unwrap() + n)
-        // });
-        // assert!(
-        //     self.pieces_len().windows(2).all(|w| w[0] >= w[1]),
-        //     format!("After:{:?}", self.pieces_len(),)
-        // );
+    fn _check(&self) {
+        // check that the pieces are correct
+        self.pieces.windows(2).for_each(|v| unsafe {
+            let ptr1 = v[0].data.as_ptr();
+            assert_eq!(ptr1.add(v[0].data.len()) as *const T, v[1].data.as_ptr());
+        });
+        let lengths = self.pieces_len();
+        let mut iter = lengths.iter();
+        let first = iter.next();
+        let _ = iter.scan(first, |state, n| {
+            assert!(state.unwrap() >= n);
+            Some(state.unwrap() + n)
+        });
+        assert!(
+            self.pieces_len().windows(2).all(|w| w[0] >= w[1]),
+            format!("After:{:?}", self.pieces_len(),)
+        );
     }
     fn merge(&mut self)
     where
@@ -164,16 +165,6 @@ where
             let b = &self.pieces[len - 1];
             if a.len() == b.len() && a.offset % (a.len() * 2) == 0 {
                 // we can merge, remove last item
-                assert!(
-                    a.offset % (a.len() * 2) == 0,
-                    format!(
-                        "Index: {}, X: {:?}, {}, {}",
-                        self.pieces.len(),
-                        self.pieces_len(),
-                        a.offset,
-                        b.offset
-                    )
-                );
 
                 let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 // let a = &mut self.pieces.last_mut().unwrap();
@@ -184,25 +175,22 @@ where
                 assert_eq!(a.offset + a.len(), b.offset);
 
                 // a.merge(b, None);
-
                 a.merge(b, Some(self));
+
                 self.pieces.insert(index, a);
                 // We inserted the element, we need to check with the neighbors
                 if index != self.pieces.len() - 1 {
-                    // println!("Merging: {:?} at {}", self.pieces_len(), index);
+                    // that means while merging we got more pieces. We now need to merge
+                    // from the inside
                     self.merge_index(index);
                 }
-            // assert!(
-            //     self.pieces_len().windows(2).all(|w| w[0] >= w[1]),
-            //     format!("{:?}", self.pieces_len())
-            // );
             } else {
                 break; // nothing to do
             }
         }
     }
     fn merge_index(&mut self, mut index: usize) {
-        // println!("Index: {}, Before: {:?}", index, self.pieces_len());
+        // merge neighbors of the sorted piece at index i
         // forwards
         let mut change = true;
         while change {
@@ -213,6 +201,7 @@ where
                 && a.len() == self.pieces[index + 1].len()
                 && a.offset % (a.len() * 2) == 0
             {
+                // merge right neighbor
                 change = true;
                 let b = self.pieces.remove(index + 1);
                 let a = &mut self.pieces[index];
@@ -225,6 +214,7 @@ where
                     && a.len() == self.pieces[index - 1].len()
                     && a.offset % (a.len() * 2) != 0
                 {
+                    // merge left neighbor
                     change = true;
                     let b = self.pieces.remove(index);
                     let a = &mut self.pieces[index - 1];
@@ -238,16 +228,9 @@ where
         }
         // println!("Index: {}, After: {:?}", index, self.pieces_len());
     }
-    // fn merge_all(&mut self) {
-    //     if self.pieces.len() >= 1 {
-    //         let x = self.pieces.pop().unwrap();
-    //         self.merge_all();
-    //         self.pieces.push(x);
-    //         self.merge();
-    //     }
-    // }
+
     fn split(self: &mut Self) -> bool {
-        self.check();
+        // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
         if elem_left < 256 {
             return false;
@@ -257,7 +240,7 @@ where
         // that to the other task. That means the other task will get more work.
         let split_index = elem_left.next_power_of_two() / 2;
 
-        // split off a part for the other guy
+        // split off a part for the other task
         let right_to = cut_off_right(&mut self.to, elem_left - split_index);
         let right_data = cut_off_right(&mut self.data, elem_left - split_index);
         // println!("Splitting {} in {} vs {}", total, a.len() + index, b.len());
@@ -281,11 +264,6 @@ where
                 })
             },
         );
-        // self.check();
-        // other.merge_all(); // Optional, will probably make stuff shorter
-        // other.check();
-        // assert!(other.pieces.len() == 1);
-        other.merge();
         assert!(
             other.pieces.len() == 1,
             format!("Fail:{:?}", other.pieces_len())
@@ -330,22 +308,13 @@ where
         if self.data.len() < 256 {
             return false;
         }
-        // self.check();
+        // Put in a new vector to sort on
         let pieces = std::mem::replace(&mut self.pieces, Vec::new());
 
-        // println!("len: {}", self.data.len());
-        // assert!(false);
-        self.split();
-        self.check();
-        // self.check();
-        // assert_eq!(self.pieces.len(), 1);
-        // println!("{:?}", self.pieces_len());
+        self.mergesort();
         let mut new = std::mem::replace(&mut self.pieces, pieces);
-        // println!("Plus {:?}", self.pieces_len());
+        // Merge back the other elements
         self.pieces.append(&mut new);
-        // self.check();
-
-        // self.merge();
         return true;
     }
 }
