@@ -59,7 +59,7 @@ where
             progress: Default::default(),
             f: f,
         };
-        merge.two_merge();
+        rayon::subgraph("merging", self.data.len(), || merge.two_merge());
         self.in_data = !self.in_data;
         self.data = data;
         self.buffer = buffer;
@@ -170,12 +170,10 @@ where
                 let buffer = r;
                 assert_eq!(a.len() + b.len(), buffer.len());
 
-                //  try split the mergesort
+                //  try split the mergesort. For borrowing, we need to take the sort callback
                 let mut f = std::mem::replace(&mut self.f, None);
                 if let Some(f) = &mut f {
-                    f.run();
-                    self.spawn(steal_counter);
-                    // rayon::join(|| self.spawn(steal_counter), || f.run());
+                    rayon::join(|| self.spawn(steal_counter), || f.run());
                     return;
                 };
                 let _ = std::mem::replace(&mut self.f, f);
