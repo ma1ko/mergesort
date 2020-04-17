@@ -141,8 +141,7 @@ where
         loop {
             let steal_counter = steal::get_my_steal_count();
             let work_left = self.to.len() - progress.output;
-            if steal_counter == 0 {
-                // || work_left < MIN_WORK_SIZE {
+            if steal_counter == 0 || work_left < unsafe { MIN_WORK_SIZE } {
                 // Do a part of the work
                 progress.work_size = std::cmp::min(unsafe { MIN_WORK_SIZE }, work_left);
                 unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
