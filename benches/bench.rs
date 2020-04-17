@@ -1,97 +1,58 @@
 use criterion::Bencher;
 use criterion::BenchmarkGroup;
 use criterion::*;
-use mergesort::merge::two_merge1;
 use mergesort::{mergesort, steal};
 // use rayon_logs::prelude::*;
 use rayon::prelude::*;
 #[macro_use]
 extern crate lazy_static;
-use itertools;
 lazy_static! {
-    static ref V: Vec<usize> = std::iter::repeat_with(rand::random)
+    static ref V: Vec<u32> = std::iter::repeat_with(rand::random)
         .take(2usize.pow(20))
-        .map(|x: usize| x % 1_000_000)
+        .map(|x: u32| x % 1_000_000)
         .collect();
-    static ref checksum: usize = V.iter().sum();
+    // static ref checksum: usize = V.iter().sum::<u32>() as usize;
 }
 
-fn verify(numbers: &Vec<usize>) {
-    assert_eq!(numbers.iter().sum::<usize>(), *checksum);
+fn verify(numbers: &Vec<u32>) {
+    // assert_eq!(numbers.iter().sum::<u32>(), *checksum);
     assert!(numbers.windows(2).all(|w| w[0] <= w[1]));
 }
-pub fn merge_speed_test(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
-    let mut v = V.clone();
-    v.sort();
-    v.reverse();
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .steal_callback(move |x| steal::steal(10, x))
-        .build()
-        .unwrap();
-    for size in 2..10 {
-        let mut res = Vec::new();
-        res.resize(V.len(), 0);
 
-        group.bench_with_input(BenchmarkId::new("Merging_mine", size), &size, |b, &size| {
-            b.iter_batched(
-                || (v.clone(), res.clone()),
-                |(mut v, mut buffer)| {
-                    let len = v.len();
-                    let mut chunks: Vec<&mut [usize]> = v.chunks_mut(len / size).collect();
-                    // let mut buffer = res.clone();
-
-                    assert_eq!(res.len(), buffer.len());
-
-                    // res.iter_mut()
-                    //     .zip(itertools::kmerge(chunks))
-                    //     .for_each(|(mut r, v)| *r = *v);
-                    let mut locations = Vec::new();
-                    chunks.iter().for_each(|x| locations.push(true));
-                    chunks.iter_mut().for_each(|x| x.sort());
-
-                    let chunks: &mut [&mut [usize]] = &mut chunks;
-                    // let x = pool.install(|| two_merge1(chunks, &mut buffer, locations));
-                    // if x {
-                    //     buffer.iter_mut().zip(v).for_each(|(t, b)| *t = b);
-                    // }
-                    verify(&buffer.to_vec());
-
-                    // let res = pool.install(|| {
-                    //     let mut locations = Vec::new();
-                    //     chunks.iter().for_each(locations.push(true));
-                    //     two_merge(&chunks, &mut res, locations);
-                    //     res
-                    // });
-                    // verify(&res);
-                },
-                BatchSize::SmallInput,
-            );
-        });
-    }
-}
 pub fn adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
-    for size in 1..5 {
-        //&[2, 4, 6, 8, 10, 12, 15, 20, 25, 30] {
-        group.bench_with_input(BenchmarkId::new("Adaptive", size), &size, |b, &size| {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(size)
-                .steal_callback(move |x| steal::steal(10, x))
-                .build()
-                .unwrap();
+    for steal_counter in &[2, 4, 6, 8, 10] {
+        for block_size in &[64, 256, 1024, 4096] {
+            unsafe { mergesort::MIN_BLOCK_SIZE = *block_size }
+            for work_size in &[64, 256, 1024, 4096] {
+                unsafe { mergesort::merge::MIN_WORK_SIZE = *work_size }
+                let parameter_string = format!(
+                    "steal:{}, block: {}, work: {}",
+                    steal_counter, block_size, work_size
+                );
+                group.bench_with_input(
+                    BenchmarkId::new("Adaptive", parameter_string),
+                    &steal_counter,
+                    |b, _| {
+                        let pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(4)
+                            .steal_callback(move |x| steal::steal(*steal_counter, x))
+                            .build()
+                            .unwrap();
 
-            b.iter_batched(
-                || V.clone(),
-                |mut numbers| {
-                    /*let (_, log) =*/
-                    pool.install(|| {
-                        mergesort(&mut numbers);
-                        verify(&numbers);
-                    });
-                },
-                BatchSize::SmallInput,
-            );
-        });
+                        b.iter_batched(
+                            || V.clone(),
+                            |mut numbers| {
+                                pool.install(|| {
+                                    mergesort(&mut numbers);
+                                    verify(&numbers);
+                                });
+                            },
+                            BatchSize::SmallInput,
+                        );
+                    },
+                );
+            }
+        }
     }
 }
 pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
@@ -108,7 +69,7 @@ pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTim
 
                 b.iter_batched(
                     || V.clone(),
-                    |mut numbers| {
+                    |numbers| {
                         pool.install(|| {
                             //adaptive_sort(&mut numbers);
                             verify(&numbers);
@@ -119,6 +80,35 @@ pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTim
             },
         );
     }
+}
+pub fn comparison() {
+    let pool = rayon_logs::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .steal_callback(move |x| steal::steal(10, x))
+        .build()
+        .unwrap();
+
+    pool.compare()
+        .attach_algorithm_with_setup(
+            "My mergesort",
+            || V.clone(),
+            |mut v| {
+                mergesort(&mut v);
+                verify(&v);
+            },
+        )
+        .attach_algorithm_with_setup(
+            "Rayon par_sort",
+            || V.clone(),
+            |mut v| {
+                let x: &mut [_] = &mut v;
+                rayon_logs::prelude::ParallelSliceMut::par_sort(x); // .par_sort();
+                verify(&v);
+            },
+        )
+        .generate_logs("comparison.html")
+        .expect("Failed saving logs");
+    println!("generated comparison.html");
 }
 
 pub fn iterator(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
@@ -162,10 +152,11 @@ fn bench(c: &mut Criterion) {
     group.sample_size(10);
 
     //rayon_adaptive(&mut group);
-    adaptive(&mut group);
     // group.bench_function("single", |mut b: &mut Bencher| {
     //     single(&mut b);
     // });
+    adaptive(&mut group);
+    // comparison();
 
     /*
     group.bench_function("iterator", |mut b: &mut Bencher| {
