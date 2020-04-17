@@ -1,6 +1,6 @@
 use crate::rayon;
 use crate::steal;
-const MIN_WORK_SIZE: usize = 5000;
+pub static mut MIN_WORK_SIZE: usize = 5000;
 
 pub type RunTask = dyn FnMut() -> () + Sync + Send;
 pub trait Task: Send + Sync {
@@ -59,7 +59,8 @@ where
             progress: Default::default(),
             f: f,
         };
-        rayon::subgraph("merging", self.data.len(), || merge.two_merge());
+        // rayon::subgraph("merging", self.data.len(), || merge.two_merge());
+        merge.two_merge();
         self.in_data = !self.in_data;
         self.data = data;
         self.buffer = buffer;
@@ -128,18 +129,7 @@ where
     pub progress: MergeProgress,
     pub f: Option<&'b mut dyn Task>,
 }
-// impl<'a, T> Task for Merge<'a, T>
-// where
-//     T: Ord + Sync + Send + Copy,
-// {
-//     fn run(&mut self, me: Option<&mut dyn Task>) -> bool {
-//         if me.is_none() {
-//             return false;
-//         }
-//         unimplemented!(); // TODO
-//         return false;
-//     }
-// }
+
 impl<'a, 'b, T> Merge<'a, 'b, T>
 where
     T: Ord + Sync + Send + Copy,
@@ -154,7 +144,7 @@ where
             if steal_counter == 0 {
                 // || work_left < MIN_WORK_SIZE {
                 // Do a part of the work
-                progress.work_size = std::cmp::min(MIN_WORK_SIZE, work_left);
+                progress.work_size = std::cmp::min(unsafe { MIN_WORK_SIZE }, work_left);
                 unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
                 if self.to.len() == progress.output {
                     return; // finished
@@ -196,7 +186,7 @@ where
         };
 
         //recursive base case: just sort
-        if steal_counter == 1 || max_slice.len() < MIN_WORK_SIZE {
+        if steal_counter == 1 || max_slice.len() < unsafe { MIN_WORK_SIZE } {
             // finished splitting, let's just merge
             rayon::subgraph("merging", self.to.len(), || {
                 self.two_merge();

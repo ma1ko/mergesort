@@ -5,55 +5,7 @@ pub mod merge;
 pub mod rayon;
 pub mod steal;
 
-/*
-pub fn main_tuple() -> Result<(), Box<dyn std::error::Error>> {
-    // test for stability with a Tuple where we only sort by the first element, then test if the
-    // second elements stayed in the same order
-    let mut v: Vec<Tuple> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(24))
-        .enumerate()
-        .map(|(x, y): (usize, usize)| Tuple {
-            left: y % 10,
-            right: x,
-        })
-        .collect();
-    let pool = rayon::get_thread_pool();
-    let (_, log) = pool.logging_install(|| mergesort(&mut v));
-    assert!(v.windows(2).all(|w| w[0] <= w[1]));
-    assert!(v
-        .windows(2)
-        .all(|w| w[0] != w[1] || w[0].right <= w[1].right));
-    println!("Saving log");
-    log.save("test").expect("failed saving log");
-    println!("Saving svg");
-    log.save_svg("test.svg").expect("failed saving svg");
-    Ok(())
-}
-*/
-
-#[derive(Default, Copy, Clone, Debug)]
-struct Tuple {
-    left: usize,
-    right: usize,
-}
-impl PartialEq for Tuple {
-    fn eq(&self, other: &Tuple) -> bool {
-        return self.left == other.left;
-    }
-}
-impl Eq for Tuple {}
-
-use std::cmp::Ordering;
-impl PartialOrd for Tuple {
-    fn partial_cmp(&self, other: &Tuple) -> Option<Ordering> {
-        self.left.partial_cmp(&other.left)
-    }
-}
-impl Ord for Tuple {
-    fn cmp(&self, other: &Tuple) -> Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
+pub static mut MIN_BLOCK_SIZE: usize = 256;
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
         .take(2usize.pow(20))
@@ -74,6 +26,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
+
 pub fn mergesort<T>(data: &mut [T])
 where
     T: Ord + Sync + Send + Copy + Default,
@@ -100,7 +53,7 @@ where
     });
 
     if !in_data {
-        rayon::subgraph("last copy", tmp_slice.len(), || {
+        rayon::subgraph("merging", tmp_slice.len(), || {
             tmp_slice.iter().zip(data).for_each(|(t, b)| *b = *t);
         });
     };
@@ -142,13 +95,6 @@ where
             let ptr1 = v[0].data.as_ptr();
             assert_eq!(ptr1.add(v[0].data.len()) as *const T, v[1].data.as_ptr());
         });
-        let lengths = self.pieces_len();
-        let mut iter = lengths.iter();
-        let first = iter.next();
-        let _ = iter.scan(first, |state, n| {
-            assert!(state.unwrap() >= n);
-            Some(state.unwrap() + n)
-        });
         assert!(
             self.pieces_len().windows(2).all(|w| w[0] >= w[1]),
             format!("After:{:?}", self.pieces_len(),)
@@ -175,7 +121,7 @@ where
                 assert_eq!(a.offset + a.len(), b.offset);
 
                 // a.merge(b, None);
-                a.merge(b, Some(self));
+                rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
 
                 self.pieces.insert(index, a);
                 // We inserted the element, we need to check with the neighbors
@@ -205,10 +151,10 @@ where
                 change = true;
                 let b = self.pieces.remove(index + 1);
                 let a = &mut self.pieces[index];
-                assert_eq!(a.offset % (a.len() * 2), 0);
+                // assert_eq!(a.offset % (a.len() * 2), 0);
                 assert_eq!(a.offset + a.len(), b.offset);
                 assert_eq!(a.in_data, b.in_data);
-                a.merge(b, None);
+                rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
             } else {
                 if index > 0
                     && a.len() == self.pieces[index - 1].len()
@@ -218,10 +164,10 @@ where
                     change = true;
                     let b = self.pieces.remove(index);
                     let a = &mut self.pieces[index - 1];
-                    assert_eq!(a.offset % (a.len() * 2), 0);
+                    // assert_eq!(a.offset % (a.len() * 2), 0);
                     assert_eq!(a.offset + a.len(), b.offset);
                     assert_eq!(a.in_data, b.in_data);
-                    a.merge(b, None);
+                    rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
                     index -= 1;
                 }
             }
@@ -232,7 +178,7 @@ where
     fn split(self: &mut Self) -> bool {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
-        if elem_left < 256 {
+        if elem_left < unsafe { MIN_BLOCK_SIZE } {
             return false;
         }
         // we want to split off about half the slice, but also the right part needs to be a
@@ -281,18 +227,18 @@ where
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
             // TODO: actually use the count, don't just split in two
-            if steal_counter > 0 && elem_left > 256 {
+            if steal_counter > 0 && elem_left > unsafe { MIN_BLOCK_SIZE } {
                 self.split();
                 // self.merge();
                 return;
             }
             // Do some work: Split off and sort piece
-            let work_size = std::cmp::min(256, elem_left);
+            let work_size = std::cmp::min(unsafe { MIN_BLOCK_SIZE }, elem_left);
             let piece = cut_off_left(&mut self.data, work_size);
             piece.sort();
             let buffer = cut_off_left(&mut self.to, work_size);
             let merge = merge::MergeResult::new(piece, buffer, true, self.offset);
-            self.offset += 256;
+            self.offset += unsafe { MIN_BLOCK_SIZE };
             self.pieces.push(merge);
             // try merging pieces
             self.merge();
@@ -305,13 +251,13 @@ where
     T: Ord + Sync + Send + Copy,
 {
     fn run(&mut self) -> bool {
-        if self.data.len() < 256 {
+        if self.data.len() < unsafe { MIN_BLOCK_SIZE } {
             return false;
         }
         // Put in a new vector to sort on
         let pieces = std::mem::replace(&mut self.pieces, Vec::new());
 
-        self.mergesort();
+        rayon::subgraph("sorting", self.data.len(), || self.split());
         let mut new = std::mem::replace(&mut self.pieces, pieces);
         // Merge back the other elements
         self.pieces.append(&mut new);
