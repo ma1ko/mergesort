@@ -8,7 +8,7 @@ use rayon::prelude::*;
 extern crate lazy_static;
 lazy_static! {
     static ref V: Vec<u32> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(22))
+        .take(2usize.pow(21))
         .map(|x: u32| x % 1_000_000)
         .collect();
     // static ref checksum: usize = V.iter().sum::<u32>() as usize;
@@ -20,42 +20,42 @@ fn verify(numbers: &Vec<u32>) {
 }
 
 pub fn adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
-    for steal_counter in &[2, 4, 6, 8, 10] {
-        group.bench_with_input(
-            BenchmarkId::new("Adaptive", steal_counter),
-            &steal_counter,
-            |b, _| {
-                let pool = rayon::ThreadPoolBuilder::new()
-                    .num_threads(4)
-                    .steal_callback(move |x| steal::steal(*steal_counter, x))
-                    .build()
-                    .unwrap();
+    for steal_counter in &[1, 2, 4, 6, 8, 10] {
+        // for size in &[1, 2, 3, 4] {
+        for size in &[2, 4, 6, 8, 12, 16, 20, 24, 32] {
+            group.bench_with_input(
+                BenchmarkId::new(format!("Adaptive_{}", steal_counter), size),
+                &size,
+                |b, _| {
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(*size)
+                        .steal_callback(move |x| steal::steal(*steal_counter, x))
+                        .build()
+                        .unwrap();
 
-                b.iter_batched(
-                    || V.clone(),
-                    |mut numbers| {
-                        pool.install(|| {
-                            mergesort(&mut numbers);
-                            verify(&numbers);
-                        });
-                    },
-                    BatchSize::SmallInput,
-                );
-            },
-        );
+                    b.iter_batched(
+                        || V.clone(),
+                        |mut numbers| {
+                            pool.install(|| {
+                                mergesort(&mut numbers);
+                                verify(&numbers);
+                            });
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+        }
     }
-    // }
-    // }
 }
 pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
-    for size in 1..5 {
-        // &[2, 4, 6, 8, 10, 15, 20, 25, 30] {
+    for size in &[2, 4, 6, 8, 12, 16, 20, 24, 32] {
         group.bench_with_input(
-            BenchmarkId::new("Really Adaptive", size),
+            BenchmarkId::new("rayon-adaptive", size),
             &size,
             |b, &size| {
                 let pool = rayon::ThreadPoolBuilder::new()
-                    .num_threads(size)
+                    .num_threads(*size)
                     .build()
                     .unwrap();
 
@@ -104,7 +104,7 @@ pub fn comparison() {
 }
 
 pub fn iterator(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
-    for size in &[4] {
+    for size in &[2, 4, 6, 8, 12, 16, 20, 24, 32] {
         group.bench_with_input(BenchmarkId::new("Iterator", size), &size, |b, &size| {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(*size)
