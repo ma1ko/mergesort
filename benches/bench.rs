@@ -8,7 +8,7 @@ use rayon::prelude::*;
 extern crate lazy_static;
 lazy_static! {
     static ref V: Vec<u32> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20))
+        .take(2usize.pow(22))
         .map(|x: u32| x % 1_000_000)
         .collect();
     // static ref checksum: usize = V.iter().sum::<u32>() as usize;
@@ -21,39 +21,31 @@ fn verify(numbers: &Vec<u32>) {
 
 pub fn adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
     for steal_counter in &[2, 4, 6, 8, 10] {
-        for block_size in &[64, 256, 1024, 4096] {
-            unsafe { mergesort::MIN_BLOCK_SIZE = *block_size }
-            for work_size in &[64, 256, 1024, 4096] {
-                unsafe { mergesort::merge::MIN_WORK_SIZE = *work_size }
-                let parameter_string = format!(
-                    "steal:{}, block: {}, work: {}",
-                    steal_counter, block_size, work_size
-                );
-                group.bench_with_input(
-                    BenchmarkId::new("Adaptive", parameter_string),
-                    &steal_counter,
-                    |b, _| {
-                        let pool = rayon::ThreadPoolBuilder::new()
-                            .num_threads(4)
-                            .steal_callback(move |x| steal::steal(*steal_counter, x))
-                            .build()
-                            .unwrap();
+        group.bench_with_input(
+            BenchmarkId::new("Adaptive", steal_counter),
+            &steal_counter,
+            |b, _| {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(4)
+                    .steal_callback(move |x| steal::steal(*steal_counter, x))
+                    .build()
+                    .unwrap();
 
-                        b.iter_batched(
-                            || V.clone(),
-                            |mut numbers| {
-                                pool.install(|| {
-                                    mergesort(&mut numbers);
-                                    verify(&numbers);
-                                });
-                            },
-                            BatchSize::SmallInput,
-                        );
+                b.iter_batched(
+                    || V.clone(),
+                    |mut numbers| {
+                        pool.install(|| {
+                            mergesort(&mut numbers);
+                            verify(&numbers);
+                        });
                     },
+                    BatchSize::SmallInput,
                 );
-            }
-        }
+            },
+        );
     }
+    // }
+    // }
 }
 pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
     for size in 1..5 {
@@ -84,7 +76,7 @@ pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTim
 pub fn comparison() {
     let pool = rayon_logs::ThreadPoolBuilder::new()
         .num_threads(4)
-        .steal_callback(move |x| steal::steal(10, x))
+        .steal_callback(move |x| steal::steal(8, x))
         .build()
         .unwrap();
 
@@ -112,10 +104,10 @@ pub fn comparison() {
 }
 
 pub fn iterator(group: &mut BenchmarkGroup<criterion::measurement::WallTime>) {
-    for size in 1..5 {
+    for size in &[4] {
         group.bench_with_input(BenchmarkId::new("Iterator", size), &size, |b, &size| {
             let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(size)
+                .num_threads(*size)
                 .build()
                 .unwrap();
 
@@ -156,6 +148,7 @@ fn bench(c: &mut Criterion) {
     //     single(&mut b);
     // });
     adaptive(&mut group);
+    iterator(&mut group);
     // comparison();
 
     /*
@@ -163,7 +156,6 @@ fn bench(c: &mut Criterion) {
         iterator(&mut b);
     });
     */
-    iterator(&mut group);
 
     /*
     group.bench_function("perfect split", |b| {
