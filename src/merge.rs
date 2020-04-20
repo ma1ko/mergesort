@@ -50,6 +50,7 @@ where
 
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
         assert!(self.in_data == other.in_data);
+        assert!(self.data.len() == other.data.len());
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
         let mut merge: Merge<T> = Merge {

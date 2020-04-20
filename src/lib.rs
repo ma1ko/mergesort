@@ -8,7 +8,7 @@ pub mod steal;
 pub const MIN_BLOCK_SIZE: usize = 4096;
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(24))
+        .take(2usize.pow(20))
         .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -113,8 +113,9 @@ where
 
                 let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 // let a = &mut self.pieces.last_mut().unwrap();
-                // we need to temporarily remove this item to avoid merge issues
+                // we need to temporarily remove this item to avoid lifetime and merge issues
                 let mut a: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
+                // that's where it needs to be inserted again
                 let index = self.pieces.len();
                 assert_eq!(a.in_data, b.in_data);
                 assert_eq!(a.offset + a.len(), b.offset);
@@ -136,7 +137,6 @@ where
     }
     fn merge_index(&mut self, mut index: usize) {
         // merge neighbors of the sorted piece at index i
-        // forwards
         let mut change = true;
         while change {
             change = false;
@@ -176,7 +176,9 @@ where
     fn split(self: &mut Self, steal_counter: Option<usize>) -> bool {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
-        if elem_left < MIN_BLOCK_SIZE {
+        if elem_left < 2 * MIN_BLOCK_SIZE {
+            self.mergesort();
+            // if we split in two, each block should have at least MIN_BLOCK_SIZE elements
             return false;
         }
         // we want to split off about half the slice, but also the right part needs to be a
@@ -196,7 +198,9 @@ where
             to: right_to,
             offset: self.offset + (elem_left - split_index),
         };
-        if steal_counter.unwrap_or(0) < 2 {
+        // decide if we need to split even more: if the steal counter is high enough and theres
+        // still elements left, we can do that
+        if steal_counter.unwrap_or(0) < 1 || elem_left < 4 * MIN_BLOCK_SIZE {
             rayon::join(|| self.mergesort(), || other.mergesort());
         } else {
             rayon::join(|| self.split(None), || other.split(None));
@@ -223,6 +227,7 @@ where
                 return;
             }
             // Do some work: Split off and sort piece
+            assert!(elem_left >= MIN_BLOCK_SIZE);
             let work_size = std::cmp::min(MIN_BLOCK_SIZE, elem_left);
             let piece = cut_off_left(&mut self.data, work_size);
             rayon::subgraph("actual sort", MIN_BLOCK_SIZE, || piece.sort());
@@ -241,7 +246,7 @@ where
     T: Ord + Sync + Send + Copy,
 {
     fn run(&mut self) -> bool {
-        if self.data.len() < MIN_BLOCK_SIZE {
+        if self.data.len() < 2 * MIN_BLOCK_SIZE {
             return false;
         }
         // Put in a new vector to sort on
