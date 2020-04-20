@@ -8,7 +8,7 @@ pub mod steal;
 pub const MIN_BLOCK_SIZE: usize = 4096;
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(22))
+        .take(2usize.pow(24))
         .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -18,11 +18,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_, log) = pool.logging_install(|| mergesort(&mut v));
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
-    println!("Saving log");
-    log.save("test").expect("failed saving log");
+    // println!("Saving log");
+    // log.save("test").expect("failed saving log");
 
-    println!("Saving svg");
-    log.save_svg("test.svg").expect("failed saving svg");
+    // println!("Saving svg");
+    // log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
 
@@ -173,7 +173,7 @@ where
         }
     }
 
-    fn split(self: &mut Self) -> bool {
+    fn split(self: &mut Self, steal_counter: Option<usize>) -> bool {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
         if elem_left < MIN_BLOCK_SIZE {
@@ -196,9 +196,13 @@ where
             to: right_to,
             offset: self.offset + (elem_left - split_index),
         };
-        rayon::join(|| self.mergesort(), || other.mergesort());
+        if steal_counter.unwrap_or(0) < 2 {
+            rayon::join(|| self.mergesort(), || other.mergesort());
+        } else {
+            rayon::join(|| self.split(None), || other.split(None));
+        }
         assert!(
-            other.pieces.len() == 1,
+            other.pieces.len() <= 1,
             format!("Fail:{:?}", other.pieces_len())
         );
 
@@ -215,8 +219,7 @@ where
             let steal_counter = steal::get_my_steal_count();
             // TODO: actually use the count, don't just split in two
             if steal_counter > 0 && elem_left > MIN_BLOCK_SIZE {
-                self.split();
-                // self.merge();
+                self.split(Some(steal_counter));
                 return;
             }
             // Do some work: Split off and sort piece
@@ -244,8 +247,8 @@ where
         // Put in a new vector to sort on
         let pieces = std::mem::replace(&mut self.pieces, Vec::new());
 
-        // rayon::subgraph("sorting", self.data.len(), || self.split());
-        self.split();
+        // TODO: get split counter
+        self.split(None);
         let mut new = std::mem::replace(&mut self.pieces, pieces);
         // Merge back the other elements
         self.pieces.append(&mut new);
