@@ -4,6 +4,7 @@ use criterion::*;
 use mergesort::{mergesort, steal};
 // use rayon_logs::prelude::*;
 use rayon::prelude::*;
+use rayon_adaptive::adaptive_sort;
 #[macro_use]
 extern crate lazy_static;
 lazy_static! {
@@ -61,9 +62,9 @@ pub fn rayon_adaptive(group: &mut BenchmarkGroup<criterion::measurement::WallTim
 
                 b.iter_batched(
                     || V.clone(),
-                    |numbers| {
+                    |mut numbers| {
                         pool.install(|| {
-                            //adaptive_sort(&mut numbers);
+                            adaptive_sort(&mut numbers);
                             verify(&numbers);
                         });
                     },
@@ -143,7 +144,7 @@ fn bench(c: &mut Criterion) {
     group.warm_up_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
 
-    //rayon_adaptive(&mut group);
+    rayon_adaptive(&mut group);
     // group.bench_function("single", |mut b: &mut Bencher| {
     //     single(&mut b);
     // });
