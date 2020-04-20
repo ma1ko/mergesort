@@ -16,7 +16,12 @@ where
     RA: Send,
     RB: Send,
 {
-    rayon_logs::join(oper_a, oper_b)
+    rayon_logs::join(oper_a, || {
+        steal::active();
+        let x = oper_b();
+        steal::inactive();
+        x
+    })
     // rayon::join(oper_a, oper_b)
 }
 

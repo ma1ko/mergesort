@@ -30,6 +30,7 @@ pub fn mergesort<T>(data: &mut [T])
 where
     T: Ord + Sync + Send + Copy + Default,
 {
+    steal::active();
     let mut tmp_slice: Vec<T> = Vec::with_capacity(data.len());
     unsafe { tmp_slice.set_len(data.len()) }
     let mut mergesort = Mergesort {
@@ -53,6 +54,7 @@ where
             tmp_slice.iter().zip(data).for_each(|(t, b)| *b = *t);
         });
     };
+    steal::inactive();
 }
 // from https://stackoverflow.com/questions/42162151/rust-error-e0495-using-split-at-mut-in-a-closure
 fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {

@@ -1,16 +1,27 @@
 use crate::crossbeam::{Backoff, CachePadded};
 use crate::rayon::NUM_THREADS;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 lazy_static! {
-    static ref V: Vec<CachePadded<AtomicUsize>> = (0..NUM_THREADS)
-        .map(|_| CachePadded::new(AtomicUsize::new(0)))
+    static ref V: Vec<CachePadded<(AtomicUsize, AtomicBool)>> = (0..NUM_THREADS)
+        .map(|_| CachePadded::new((AtomicUsize::new(0), AtomicBool::new(false))))
         .collect();
 }
+pub fn active() {
+    let thread_index = rayon::current_thread_index().unwrap();
+    V[thread_index].1.store(true, Ordering::Relaxed);
+}
+pub fn inactive() {
+    let thread_index = rayon::current_thread_index().unwrap();
+    V[thread_index].1.store(false, Ordering::Relaxed);
+}
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 pub fn steal(backoffs: usize, victim: usize) -> Option<()> {
     let thread_index = rayon::current_thread_index().unwrap();
     let thread_index = 1 << thread_index;
-    V[victim].fetch_or(thread_index, Ordering::Relaxed);
+    if V[victim].1.load(Ordering::Relaxed) == false {
+        return None;
+    }
+    V[victim].0.fetch_or(thread_index, Ordering::Relaxed);
     //V[victim].fetch_add(1, Ordering::Relaxed);
 
     let backoff = Backoff::new();
@@ -19,13 +30,13 @@ pub fn steal(backoffs: usize, victim: usize) -> Option<()> {
         backoff.spin(); // spin or snooze()?
 
         // wait until the victim has taken the value, check regularly
-        c = V[victim].load(Ordering::Relaxed);
+        c = V[victim].0.load(Ordering::Relaxed);
         if c == 0 {
             return Some(());
         }
     }
 
-    V[victim].fetch_and(!thread_index, Ordering::Relaxed);
+    V[victim].0.fetch_and(!thread_index, Ordering::Relaxed);
     //let i = V[victim].fetch_sub(1, Ordering::Relaxed);
 
     //let _ = V[victim].compare_exchange_weak(c, c - 1, Ordering::Relaxed, Ordering::Relaxed);
@@ -34,7 +45,7 @@ pub fn steal(backoffs: usize, victim: usize) -> Option<()> {
 }
 pub fn get_my_steal_count() -> usize {
     let thread_index = rayon::current_thread_index().unwrap();
-    let steal_counter = V[thread_index].swap(0, Ordering::Relaxed);
+    let steal_counter = V[thread_index].0.swap(0, Ordering::Relaxed);
     let steal_counter = steal_counter.count_ones() as usize;
     let steal_counter = std::cmp::min(steal_counter, NUM_THREADS - 1);
     steal_counter
