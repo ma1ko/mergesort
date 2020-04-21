@@ -15,6 +15,7 @@ crossbeam-utils = "*"
 criterion = {git = "https://github.com/ma1ko/criterion.rs"}
 rand = "*"
 itertools = "*"
+num_cpus = "*"
 
 [[bench]]
 name = "bench"

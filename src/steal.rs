@@ -1,8 +1,9 @@
 use crate::crossbeam::{Backoff, CachePadded};
-use crate::rayon::NUM_THREADS;
+use num_cpus;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 lazy_static! {
-    static ref V: Vec<CachePadded<(AtomicUsize, AtomicBool)>> = (0..NUM_THREADS)
+    static ref NUM_THREADS: usize = num_cpus::get();
+    static ref V: Vec<CachePadded<(AtomicUsize, AtomicBool)>> = (0..*NUM_THREADS)
         .map(|_| CachePadded::new((AtomicUsize::new(0), AtomicBool::new(false))))
         .collect();
 }
@@ -47,6 +48,6 @@ pub fn get_my_steal_count() -> usize {
     let thread_index = rayon::current_thread_index().unwrap();
     let steal_counter = V[thread_index].0.swap(0, Ordering::Relaxed);
     let steal_counter = steal_counter.count_ones() as usize;
-    let steal_counter = std::cmp::min(steal_counter, NUM_THREADS - 1);
+    let steal_counter = std::cmp::min(steal_counter, *NUM_THREADS - 1);
     steal_counter
 }

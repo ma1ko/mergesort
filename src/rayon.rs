@@ -1,8 +1,7 @@
 use crate::steal;
-pub const NUM_THREADS: usize = 4;
 pub fn get_thread_pool() -> rayon_logs::ThreadPool {
     rayon_logs::ThreadPoolBuilder::new()
-        .num_threads(NUM_THREADS)
+        .num_threads(num_cpus::get())
         .steal_callback(|x| steal::steal(8, x))
         .build()
         .unwrap()
