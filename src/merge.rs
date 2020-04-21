@@ -1,7 +1,11 @@
 use crate::rayon;
 use crate::steal;
-pub const MIN_WORK_SIZE: usize = 4096;
 
+lazy_static! {
+    static ref MIN_MERGE_SIZE: usize = std::env::var("MERGESIZE")
+        .map(|x| x.parse::<usize>().unwrap())
+        .unwrap_or(256);
+}
 pub type RunTask = dyn FnMut() -> () + Sync + Send;
 pub trait Task: Send + Sync {
     // run self *and* me, or return false if you can't
@@ -142,9 +146,9 @@ where
         loop {
             let steal_counter = steal::get_my_steal_count();
             let work_left = self.to.len() - progress.output;
-            if steal_counter == 0 || work_left < MIN_WORK_SIZE {
+            if steal_counter == 0 || work_left < 32 * *MIN_MERGE_SIZE {
                 // Do a part of the work
-                progress.work_size = std::cmp::min(MIN_WORK_SIZE, work_left);
+                progress.work_size = std::cmp::min(*MIN_MERGE_SIZE, work_left);
                 unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
                 if self.to.len() == progress.output {
                     return; // finished
@@ -186,7 +190,7 @@ where
         };
 
         //recursive base case: just sort
-        if steal_counter == 1 || max_slice.len() < MIN_WORK_SIZE {
+        if steal_counter == 1 || max_slice.len() < *MIN_MERGE_SIZE {
             // finished splitting, let's just merge
             rayon::subgraph("merging", self.to.len(), || {
                 self.two_merge();

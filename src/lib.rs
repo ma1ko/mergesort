@@ -5,7 +5,11 @@ pub mod merge;
 pub mod rayon;
 pub mod steal;
 
-pub const MIN_BLOCK_SIZE: usize = 4096;
+lazy_static! {
+    static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
+        .map(|x| x.parse::<usize>().unwrap())
+        .unwrap_or(128);
+}
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
         .take(2usize.pow(20))
@@ -180,7 +184,7 @@ where
     fn split(self: &mut Self, steal_counter: Option<usize>) -> bool {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
-        if elem_left < 2 * MIN_BLOCK_SIZE {
+        if elem_left < 32 * *MIN_BLOCK_SIZE {
             self.mergesort();
             // if we split in two, each block should have at least MIN_BLOCK_SIZE elements
             return false;
@@ -204,7 +208,7 @@ where
         };
         // decide if we need to split even more: if the steal counter is high enough and theres
         // still elements left, we can do that
-        if steal_counter.unwrap_or(0) < 1 || elem_left < 4 * MIN_BLOCK_SIZE {
+        if steal_counter.unwrap_or(0) < 2 || elem_left < 4 * *MIN_BLOCK_SIZE {
             rayon::join(|| self.mergesort(), || other.mergesort());
         } else {
             rayon::join(|| self.split(None), || other.split(None));
@@ -226,18 +230,18 @@ where
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
             // TODO: actually use the count, don't just split in two
-            if steal_counter > 0 && elem_left > MIN_BLOCK_SIZE {
+            if steal_counter > 0 && elem_left > *MIN_BLOCK_SIZE {
                 self.split(Some(steal_counter));
                 return;
             }
             // Do some work: Split off and sort piece
-            assert!(elem_left >= MIN_BLOCK_SIZE);
-            let work_size = std::cmp::min(MIN_BLOCK_SIZE, elem_left);
+            assert!(elem_left >= *MIN_BLOCK_SIZE);
+            let work_size = std::cmp::min(*MIN_BLOCK_SIZE, elem_left);
             let piece = cut_off_left(&mut self.data, work_size);
-            rayon::subgraph("actual sort", MIN_BLOCK_SIZE, || piece.sort());
+            rayon::subgraph("actual sort", *MIN_BLOCK_SIZE, || piece.sort());
             let buffer = cut_off_left(&mut self.to, work_size);
             let merge = merge::MergeResult::new(piece, buffer, true, self.offset);
-            self.offset += MIN_BLOCK_SIZE;
+            self.offset += *MIN_BLOCK_SIZE;
             self.pieces.push(merge);
             // try merging pieces
             self.merge();
@@ -250,7 +254,7 @@ where
     T: Ord + Sync + Send + Copy,
 {
     fn run(&mut self) -> bool {
-        if self.data.len() < 2 * MIN_BLOCK_SIZE {
+        if self.data.len() < 32 * *MIN_BLOCK_SIZE {
             return false;
         }
         // Put in a new vector to sort on
