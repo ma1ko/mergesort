@@ -18,6 +18,7 @@ num_cpus = "*"
 
 [dev-dependencies]
 criterion = {git = "https://github.com/ma1ko/criterion.rs"}
+rayon_logs = {git = "https://github.com/ma1ko/rayon-logs"}
 
 
 [features]
