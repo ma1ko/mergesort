@@ -25,20 +25,17 @@ where
 {
     #[cfg(feature = "logs")]
     return rayon_logs::join(oper_a, || {
-        steal::active();
         let x = oper_b();
-        steal::inactive();
         x
     });
     #[cfg(not(feature = "logs"))]
     return rayon::join(oper_a, || {
-        steal::active();
         let x = oper_b();
-        steal::inactive();
         x
     });
 }
 
+#[allow(unused)]
 pub fn subgraph<OP, R>(work_type: &'static str, work_amount: usize, op: OP) -> R
 where
     OP: FnOnce() -> R,
