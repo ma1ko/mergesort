@@ -15,14 +15,18 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let checksum: usize = v.iter().sum();
 
     let pool = rayon::get_thread_pool();
-    let (_, log) = pool.logging_install(|| mergesort(&mut v));
+    #[cfg(feature = "logs")]
+    {
+        let (_, log) = pool.logging_install(|| mergesort(&mut v));
+        println!("Saving log");
+        log.save("test").expect("failed saving log");
+        println!("Saving svg");
+        log.save_svg("test.svg").expect("failed saving svg");
+    }
+    #[cfg(not(feature = "logs"))]
+    let _ = pool.install(|| mergesort(&mut v));
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
-    // println!("Saving log");
-    // log.save("test").expect("failed saving log");
-
-    // println!("Saving svg");
-    // log.save_svg("test.svg").expect("failed saving svg");
     Ok(())
 }
 

@@ -8,14 +8,20 @@ edition = "2018"
 
 [dependencies]
 rayon = {git = "https://github.com/ma1ko/rayon"}
-rayon_logs = { git = "https://github.com/ma1ko/rayon-logs"}
+rayon_logs = { optional = true, git = "https://github.com/ma1ko/rayon-logs"}
 rayon_adaptive = {git = "https://github.com/ma1ko/rayon-adaptive"}
 lazy_static = "*"
 crossbeam-utils = "*"
-criterion = {git = "https://github.com/ma1ko/criterion.rs"}
 rand = "*"
 itertools = "*"
 num_cpus = "*"
+
+[dev-dependencies]
+criterion = {git = "https://github.com/ma1ko/criterion.rs"}
+
+
+[features]
+logs = ["rayon_logs"]
 
 [[bench]]
 name = "bench"

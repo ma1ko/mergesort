@@ -1,7 +1,15 @@
 use crate::steal;
+
+#[cfg(feature = "logs")]
 pub fn get_thread_pool() -> rayon_logs::ThreadPool {
     rayon_logs::ThreadPoolBuilder::new()
-        .num_threads(num_cpus::get())
+        .steal_callback(|x| steal::steal(8, x))
+        .build()
+        .unwrap()
+}
+#[cfg(not(feature = "logs"))]
+pub fn get_thread_pool() -> rayon::ThreadPool {
+    rayon::ThreadPoolBuilder::new()
         .steal_callback(|x| steal::steal(8, x))
         .build()
         .unwrap()
@@ -15,19 +23,28 @@ where
     RA: Send,
     RB: Send,
 {
-    rayon_logs::join(oper_a, || {
+    #[cfg(feature = "logs")]
+    return rayon_logs::join(oper_a, || {
         steal::active();
         let x = oper_b();
         steal::inactive();
         x
-    })
-    // rayon::join(oper_a, oper_b)
+    });
+    #[cfg(not(feature = "logs"))]
+    return rayon::join(oper_a, || {
+        steal::active();
+        let x = oper_b();
+        steal::inactive();
+        x
+    });
 }
 
 pub fn subgraph<OP, R>(work_type: &'static str, work_amount: usize, op: OP) -> R
 where
     OP: FnOnce() -> R,
 {
-    rayon_logs::subgraph(work_type, work_amount, op)
-    // op()
+    #[cfg(feature = "logs")]
+    return rayon_logs::subgraph(work_type, work_amount, op);
+    #[cfg(not(feature = "logs"))]
+    return op();
 }
