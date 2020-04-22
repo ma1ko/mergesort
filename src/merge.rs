@@ -5,6 +5,7 @@ lazy_static! {
     static ref MIN_MERGE_SIZE: usize = std::env::var("MERGESIZE")
         .map(|x| x.parse::<usize>().unwrap())
         .unwrap_or(256);
+    static ref SPLIT_THRESHOLD: usize = 32 * *MIN_MERGE_SIZE;
 }
 pub type RunTask = dyn FnMut() -> () + Sync + Send;
 pub trait Task: Send + Sync {
@@ -57,16 +58,39 @@ where
         assert!(self.data.len() == other.data.len());
         let buffer = fuse_slices(self.buffer, other.buffer);
         let data = fuse_slices(self.data, other.data);
-        let mut merge: Merge<T> = Merge {
-            left: &mut self.location(),
-            right: &mut other.location(),
-            to: if self.in_data { buffer } else { data },
-            progress: Default::default(),
-            f: f,
+
+        if buffer.len() < *SPLIT_THRESHOLD {
+            let left: *mut [T] = if self.in_data {
+                self.buffer.copy_from_slice(self.data);
+                self.buffer as *mut [T]
+            } else {
+                self.data.copy_from_slice(self.buffer);
+                self.data as *mut [T]
+            };
+            let left: &[T] = unsafe { left.as_ref().unwrap() };
+
+            let mut x = Merge {
+                left: &left,
+                right: &mut other.location(),
+                to: if self.in_data { data } else { buffer },
+                progress: Default::default(),
+                f: f,
+            };
+            x.two_merge();
+            self.in_data = !self.in_data;
+        } else {
+            let mut x = Merge {
+                left: &mut self.location(),
+                right: &mut other.location(),
+                to: if self.in_data { buffer } else { data },
+                progress: Default::default(),
+                f: f,
+            };
+            x.two_merge();
+            self.in_data = !self.in_data;
         };
+
         // rayon::subgraph("merging", self.data.len(), || merge.two_merge());
-        merge.two_merge();
-        self.in_data = !self.in_data;
         self.data = data;
         self.buffer = buffer;
     }
@@ -146,7 +170,7 @@ where
         loop {
             let steal_counter = steal::get_my_steal_count();
             let work_left = self.to.len() - progress.output;
-            if steal_counter == 0 || work_left < 32 * *MIN_MERGE_SIZE {
+            if steal_counter == 0 || work_left < *SPLIT_THRESHOLD {
                 // Do a part of the work
                 progress.work_size = std::cmp::min(*MIN_MERGE_SIZE, work_left);
                 unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
