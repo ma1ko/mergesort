@@ -77,7 +77,6 @@ where
                 f: f,
             };
             x.two_merge();
-            self.in_data = !self.in_data;
         } else {
             let mut x = Merge {
                 left: &mut self.location(),
