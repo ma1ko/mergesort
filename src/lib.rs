@@ -3,20 +3,23 @@ extern crate lazy_static;
 use crossbeam_utils as crossbeam;
 pub mod merge;
 pub mod rayon;
+mod slice_merge;
 pub mod steal;
 
 lazy_static! {
     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
         .map(|x| x.parse::<usize>().unwrap())
         .unwrap_or(128);
+    static ref MIN_SPLIT_SIZE: usize = 32 * *MIN_BLOCK_SIZE;
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20))
+        .take(2usize.pow(27))
         .map(|x: usize| x % 1_000_000)
         .collect();
 
     let checksum: usize = v.iter().sum();
+    println!("Finished generating");
 
     let pool = rayon::get_thread_pool();
     #[cfg(feature = "logs")]
@@ -47,6 +50,15 @@ where
         offset: 0,
     };
     mergesort.mergesort();
+    use std::sync::atomic::Ordering;
+
+    for (x, t) in &*merge::MERGE_SPEEDS {
+        let (x, t) = (x.load(Ordering::Relaxed), t.load(Ordering::Relaxed));
+        if t == 0 {
+            continue;
+        }
+        println!("{}", x / t);
+    }
 
     // println!("Result: {:?}", mergesort.pieces_len());
 
@@ -184,7 +196,7 @@ where
     fn split(self: &mut Self, steal_counter: Option<usize>) -> bool {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
-        if elem_left < 32 * *MIN_BLOCK_SIZE {
+        if elem_left < *MIN_SPLIT_SIZE {
             self.mergesort();
             // if we split in two, each block should have at least MIN_BLOCK_SIZE elements
             return false;
@@ -208,7 +220,7 @@ where
         };
         // decide if we need to split even more: if the steal counter is high enough and theres
         // still elements left, we can do that
-        if steal_counter.unwrap_or(0) < 2 || elem_left < 4 * *MIN_BLOCK_SIZE {
+        if steal_counter.unwrap_or(0) < 2 || elem_left < 2 * *MIN_SPLIT_SIZE {
             rayon::join(|| self.mergesort(), || other.mergesort());
         } else {
             rayon::join(|| self.split(None), || other.split(None));
@@ -230,7 +242,7 @@ where
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
             // TODO: actually use the count, don't just split in two
-            if steal_counter > 0 && elem_left > *MIN_BLOCK_SIZE {
+            if steal_counter > 0 && elem_left > *MIN_SPLIT_SIZE {
                 self.split(Some(steal_counter));
                 return;
             }
@@ -254,8 +266,12 @@ where
     T: Ord + Sync + Send + Copy,
 {
     fn run(&mut self) -> bool {
-        if self.data.len() < 32 * *MIN_BLOCK_SIZE {
+        if self.data.is_empty() {
             return false;
+        };
+        if self.data.len() < *MIN_SPLIT_SIZE {
+            self.mergesort();
+            return true;
         }
         // Put in a new vector to sort on
         let pieces = std::mem::replace(&mut self.pieces, Vec::new());

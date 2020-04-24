@@ -1,11 +1,15 @@
 use crate::rayon;
+use crate::slice_merge;
 use crate::steal;
+use std::sync::atomic::AtomicUsize;
 
 lazy_static! {
     static ref MIN_MERGE_SIZE: usize = std::env::var("MERGESIZE")
         .map(|x| x.parse::<usize>().unwrap())
         .unwrap_or(256);
     static ref SPLIT_THRESHOLD: usize = 32 * *MIN_MERGE_SIZE;
+    pub static ref MERGE_SPEEDS: Vec<(AtomicUsize, AtomicUsize)> =
+        (0..num_cpus::get()).map(|_| Default::default()).collect();
 }
 pub type RunTask = dyn FnMut() -> () + Sync + Send;
 pub trait Task: Send + Sync {
@@ -49,6 +53,14 @@ where
             self.buffer
         }
     }
+    pub fn tmp(self: &'a Self) -> &'a [T] {
+        if self.in_data {
+            self.buffer
+        } else {
+            self.data
+        }
+    }
+
     pub fn len(self: &Self) -> usize {
         return self.data.len();
     }
@@ -56,38 +68,29 @@ where
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
         assert!(self.in_data == other.in_data);
         assert!(self.data.len() == other.data.len());
-        let buffer = fuse_slices(self.buffer, other.buffer);
-        let data = fuse_slices(self.data, other.data);
+        let mut buffer = fuse_slices(self.buffer, other.buffer);
+        let mut data = fuse_slices(self.data, other.data);
 
-        if buffer.len() < *SPLIT_THRESHOLD {
-            let left: *mut [T] = if self.in_data {
-                self.buffer.copy_from_slice(self.data);
-                self.buffer as *mut [T]
-            } else {
-                self.data.copy_from_slice(self.buffer);
-                self.data as *mut [T]
-            };
-            let left: &[T] = unsafe { left.as_ref().unwrap() };
-
-            let mut x = Merge {
-                left: &left,
-                right: &mut other.location(),
-                to: if self.in_data { data } else { buffer },
-                progress: Default::default(),
-                f: f,
-            };
-            x.two_merge();
-        } else {
-            let mut x = Merge {
-                left: &mut self.location(),
-                right: &mut other.location(),
-                to: if self.in_data { buffer } else { data },
-                progress: Default::default(),
-                f: f,
-            };
-            x.two_merge();
-            self.in_data = !self.in_data;
+        // if buffer.len() < *SPLIT_THRESHOLD {
+        //     let (src, dst) = if self.in_data {
+        //         (&mut data, &mut buffer)
+        //     } else {
+        //         (&mut buffer, &mut data)
+        //     };
+        //     unsafe {
+        //         slice_merge::merge(src, src.len() / 2, dst.as_mut_ptr(), &mut |a, b| a < b);
+        //     }
+        // } else {
+        let mut x = Merge {
+            left: &mut self.location(),
+            right: &mut other.location(),
+            to: if self.in_data { buffer } else { data },
+            progress: Default::default(),
+            f: f,
         };
+        x.two_merge();
+        self.in_data = !self.in_data;
+        // };
 
         // rayon::subgraph("merging", self.data.len(), || merge.two_merge());
         self.data = data;
@@ -163,6 +166,7 @@ where
     T: Ord + Sync + Send + Copy,
 {
     pub fn two_merge(&mut self) {
+        let now = std::time::Instant::now();
         assert_eq!(self.left.len() + self.right.len(), self.to.len());
         self.progress = Default::default();
         let mut progress = &mut self.progress;
@@ -174,6 +178,12 @@ where
                 progress.work_size = std::cmp::min(*MIN_MERGE_SIZE, work_left);
                 unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
                 if self.to.len() == progress.output {
+                    let i = ::rayon::current_thread_index().unwrap();
+                    use std::sync::atomic::Ordering::Relaxed;
+                    MERGE_SPEEDS[i].0.fetch_add(self.to.len(), Relaxed);
+                    MERGE_SPEEDS[i]
+                        .1
+                        .fetch_add(now.elapsed().as_micros() as usize, Relaxed);
                     return; // finished
                 }
                 assert!(self.to.len() >= progress.output);
