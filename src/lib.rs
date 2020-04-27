@@ -9,12 +9,12 @@ pub mod steal;
 lazy_static! {
     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
         .map(|x| x.parse::<usize>().unwrap())
-        .unwrap_or(128);
+        .unwrap_or(2usize.pow(8));
     static ref MIN_SPLIT_SIZE: usize = 32 * *MIN_BLOCK_SIZE;
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(27))
+        .take(2usize.pow(20))
         .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -50,15 +50,14 @@ where
         offset: 0,
     };
     mergesort.mergesort();
-    use std::sync::atomic::Ordering;
-
-    for (x, t) in &*merge::MERGE_SPEEDS {
-        let (x, t) = (x.load(Ordering::Relaxed), t.load(Ordering::Relaxed));
-        if t == 0 {
-            continue;
-        }
-        println!("{}", x / t);
-    }
+    // use std::sync::atomic::Ordering;
+    // for (x, t) in &*merge::MERGE_SPEEDS {
+    //        let (x, t) = (x.load(Ordering::Relaxed), t.load(Ordering::Relaxed));
+    //        if t == 0 {
+    //            continue;
+    //        }
+    //        println!("{}", x / t);
+    //    }
 
     // println!("Result: {:?}", mergesort.pieces_len());
 
@@ -137,7 +136,7 @@ where
                 let mut a: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 // that's where it needs to be inserted again
                 let index = self.pieces.len();
-                assert_eq!(a.in_data, b.in_data);
+                assert_ne!(a.in_data, b.in_data);
                 assert_eq!(a.offset + a.len(), b.offset);
 
                 rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
@@ -172,7 +171,7 @@ where
                 let a = &mut self.pieces[index];
                 // assert_eq!(a.offset % (a.len() * 2), 0);
                 assert_eq!(a.offset + a.len(), b.offset);
-                assert_eq!(a.in_data, b.in_data);
+                assert_ne!(a.in_data, b.in_data);
                 rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
             } else {
                 if index > 0
@@ -185,7 +184,7 @@ where
                     let a = &mut self.pieces[index - 1];
                     // assert_eq!(a.offset % (a.len() * 2), 0);
                     assert_eq!(a.offset + a.len(), b.offset);
-                    assert_eq!(a.in_data, b.in_data);
+                    assert_ne!(a.in_data, b.in_data);
                     rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
                     index -= 1;
                 }
@@ -241,7 +240,6 @@ where
         while !self.data.is_empty() {
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
-            // TODO: actually use the count, don't just split in two
             if steal_counter > 0 && elem_left > *MIN_SPLIT_SIZE {
                 self.split(Some(steal_counter));
                 return;
@@ -252,7 +250,12 @@ where
             let piece = cut_off_left(&mut self.data, work_size);
             rayon::subgraph("actual sort", *MIN_BLOCK_SIZE, || piece.sort());
             let buffer = cut_off_left(&mut self.to, work_size);
-            let merge = merge::MergeResult::new(piece, buffer, true, self.offset);
+            let merge = if self.offset.count_ones() % 2 == 0 {
+                merge::MergeResult::new(piece, buffer, true, self.offset)
+            } else {
+                buffer.copy_from_slice(piece);
+                merge::MergeResult::new(piece, buffer, false, self.offset)
+            };
             self.offset += *MIN_BLOCK_SIZE;
             self.pieces.push(merge);
             // try merging pieces
