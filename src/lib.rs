@@ -14,7 +14,7 @@ lazy_static! {
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20))
+        .take(2usize.pow(22))
         .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -34,17 +34,18 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = pool.install(|| mergesort(&mut v));
     assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
+    println!("Success!");
     Ok(())
 }
 
 pub fn mergesort<T>(data: &mut [T])
 where
-    T: Ord + Sync + Send + Copy + Default,
+    T: Ord + Sync + Send + Copy + Default + std::fmt::Debug,
 {
     let mut tmp_slice: Vec<T> = Vec::with_capacity(data.len());
     unsafe { tmp_slice.set_len(data.len()) }
     let mut mergesort = Mergesort {
-        data: data,
+        data,
         to: &mut tmp_slice,
         pieces: Vec::new(),
         offset: 0,
@@ -89,7 +90,7 @@ fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
 
 struct Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy,
+    T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     data: &'a mut [T],
     to: &'a mut [T],
@@ -98,7 +99,7 @@ where
 }
 impl<'a, T> Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy,
+    T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     fn pieces_len(&self) -> Vec<usize> {
         // mostly for debugging
@@ -136,7 +137,7 @@ where
                 let mut a: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 // that's where it needs to be inserted again
                 let index = self.pieces.len();
-                assert_ne!(a.in_data, b.in_data);
+                assert_eq!(a.in_data, b.in_data);
                 assert_eq!(a.offset + a.len(), b.offset);
 
                 rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
@@ -171,7 +172,7 @@ where
                 let a = &mut self.pieces[index];
                 // assert_eq!(a.offset % (a.len() * 2), 0);
                 assert_eq!(a.offset + a.len(), b.offset);
-                assert_ne!(a.in_data, b.in_data);
+                assert_eq!(a.in_data, b.in_data);
                 rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
             } else {
                 if index > 0
@@ -250,12 +251,12 @@ where
             let piece = cut_off_left(&mut self.data, work_size);
             rayon::subgraph("actual sort", *MIN_BLOCK_SIZE, || piece.sort());
             let buffer = cut_off_left(&mut self.to, work_size);
-            let merge = if self.offset.count_ones() % 2 == 0 {
-                merge::MergeResult::new(piece, buffer, true, self.offset)
-            } else {
-                buffer.copy_from_slice(piece);
-                merge::MergeResult::new(piece, buffer, false, self.offset)
-            };
+            // let merge = if self.offset.count_ones() % 2 == 0 {
+            let merge = merge::MergeResult::new(piece, buffer, true, self.offset);
+            // } else {
+            // buffer.copy_from_slice(piece);
+            // merge::MergeResult::new(piece, buffer, false, self.offset)
+            // };
             self.offset += *MIN_BLOCK_SIZE;
             self.pieces.push(merge);
             // try merging pieces
@@ -266,7 +267,7 @@ where
 }
 impl<'a, T> merge::Task for Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy,
+    T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     fn run(&mut self) -> bool {
         if self.data.is_empty() {

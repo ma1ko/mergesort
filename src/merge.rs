@@ -1,13 +1,13 @@
 use crate::rayon;
-// use crate::slice_merge;
+use crate::slice_merge;
 use crate::steal;
 // use std::sync::atomic::AtomicUsize;
 
 lazy_static! {
     static ref MIN_MERGE_SIZE: usize = std::env::var("MERGESIZE")
         .map(|x| x.parse::<usize>().unwrap())
-        .unwrap_or(256);
-    static ref SPLIT_THRESHOLD: usize = 32 * *MIN_MERGE_SIZE;
+        .unwrap_or(16);
+    static ref SPLIT_THRESHOLD: usize = 32 * 4 * *MIN_MERGE_SIZE;
     // pub static ref MERGE_SPEEDS: Vec<(AtomicUsize, AtomicUsize)> =
         // (0..num_cpus::get()).map(|_| Default::default()).collect();
 }
@@ -20,7 +20,7 @@ pub trait Task: Send + Sync {
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>
 where
-    T: Ord + Sync + Send + Copy,
+    T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     pub data: &'a mut [T], // that's where it starts and should be after it's merged
     pub buffer: &'a mut [T], // that's where it temporarily might be
@@ -30,7 +30,7 @@ where
 
 impl<'a, T> MergeResult<'a, T>
 where
-    T: Ord + Sync + Send + Copy,
+    T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     pub fn new(
         data: &'a mut [T],
@@ -43,7 +43,7 @@ where
             data,
             buffer,
             in_data,
-            offset: offset,
+            offset,
         }
     }
     pub fn location(self: &'a Self) -> &'a [T] {
@@ -53,20 +53,20 @@ where
             self.buffer
         }
     }
-    pub fn tmp(self: &'a Self) -> &'a [T] {
-        if self.in_data {
-            self.buffer
-        } else {
-            self.data
-        }
-    }
+    // pub fn tmp(self: &'a Self) -> &'a [T] {
+    //     if self.in_data {
+    //         self.buffer
+    //     } else {
+    //         self.data
+    //     }
+    // }
 
     pub fn len(self: &Self) -> usize {
         return self.data.len();
     }
 
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
-        assert_ne!(self.in_data, other.in_data);
+        // assert_eq!(self.in_data, other.in_data);
         assert!(self.data.len() == other.data.len());
         let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut data = fuse_slices(self.data, other.data);
@@ -77,26 +77,25 @@ where
         } else {
             (&mut buffer, &mut data)
         };
-        //     unsafe {
-        //         slice_merge::merge(src, src.len() / 2, dst.as_mut_ptr(), &mut |a, b| a < b);
-        //     }
-        // } else {
-        let ptr = dst.as_mut_ptr();
-        let (left, right) = &mut src.split_at_mut(self.data.len());
-        let mut x = Merge {
-            left: left,
-            real_right: Some(right),
-            right: unsafe {
-                std::slice::from_raw_parts_mut(ptr.add(self.data.len()), self.data.len())
-            },
+        // let ptr = buffer.as_mut_ptr();
+        let (left_data, right_data) = &mut src.split_at_mut(self.data.len());
+        // let (left_buffer, right_buffer) = &mut buffer.split_at_mut(self.data.len());
+        // left_buffer.copy_from_slice(left_data);
+        let x = Merge {
+            left: left_data, // left_buffer,
+            right: right_data,
+            real_right: None,
+            // right: unsafe { std::slice::from_raw_parts_mut(buffer.as_mut_ptr(), self.data.len()) },
+            //
             //&mut dst.split_at_mut(self.data.len()).1,
             to: &mut dst,
             progress: Default::default(),
-            f: f,
+            f,
         };
-        x.two_merge();
+        let mut merge = slice_merge::SliceMerge::new(x.left, x.right, x.to, *MIN_MERGE_SIZE);
+
+        merge.progressive_merge();
         self.in_data = !self.in_data;
-        // };
 
         // rayon::subgraph("merging", self.data.len(), || merge.two_merge());
         self.data = data;
@@ -179,7 +178,7 @@ pub struct Merge<'a, 'b, T>
 where
     T: Ord + Sync + Send + Copy,
 {
-    pub left: &'a [T],
+    pub left: &'a mut [T],
     pub right: &'a mut [T],
     pub real_right: Option<&'a mut [T]>,
     pub to: &'a mut [T],
@@ -189,51 +188,90 @@ where
 
 impl<'a, 'b, T> Merge<'a, 'b, T>
 where
-    T: Ord + Sync + Send + Copy,
+    T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
-    pub fn two_merge(&mut self) {
+    // pub fn two_merge(&mut self) {
+    //     assert_eq!(self.left.len() + self.right.len(), self.to.len());
+    //     assert_ne!(self.left.as_ptr(), self.to.as_ptr());
+    //     let x = self.left.as_mut_ptr();
+    //     unsafe {
+    //         // std::ptr::copy_nonoverlapping(
+    //         //     self.left.as_ptr(),
+    //         //     self.to.as_mut_ptr(),
+    //         //     self.left.len(),
+    //         // );
+    //         // let left = std::slice::from_raw_parts_mut(self.to.as_mut_ptr(), self.left.len());
+    //         // assert_ne!(left.as_ptr(), self.left.as_ptr());
+    //         slice_merge::merge(
+    //             &mut self.left,
+    //             &mut self.right,
+    //             self.to.as_mut_ptr(),
+    //             2usize.pow(20),
+    //         );
+    //     }
+    //     // assert_ne!(x, self.left.as_mut_ptr());
+    //     // unsafe_manual_merge2_orig(&self.left, &self.right, &mut self.to);
+    //     // let len = self.left.len();
+    //     // self.right.copy_from_slice(&self.left[0..len / 2]);
+    //     // unsafe {
+    //     //     let other = std::slice::from_raw_parts(self.left.as_ptr().add(len / 2), len / 2);
+    //     //     Merge::unsafe_manual_merge2_orig(&self.right, other, self.left);
+    //     // }
+    // }
+
+    pub fn _progressive_merge(mut merge: &mut slice_merge::SliceMerge<T>) {
         // let now = std::time::Instant::now();
-        assert_eq!(self.left.len() + self.right.len(), self.to.len());
-        self.progress = Default::default();
-        let mut progress = &mut self.progress;
+        // assert_eq!(self.left.len() + self.right.len(), self.to.len());
+        // self.progress = Default::default();
+        // let mut progress = &mut self.progress;
+        //
         loop {
-            let steal_counter = steal::get_my_steal_count();
-            let work_left = self.to.len() - progress.output;
-            if steal_counter == 0 || work_left < *SPLIT_THRESHOLD {
-                // Do a part of the work
-                progress.work_size = std::cmp::min(*MIN_MERGE_SIZE, work_left);
-                unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
-                if self.to.len() == progress.output {
-                    // let i = ::rayon::current_thread_index().unwrap();
-                    // use std::sync::atomic::Ordering::Relaxed;
-                    // MERGE_SPEEDS[i].0.fetch_add(self.to.len(), Relaxed);
-                    // MERGE_SPEEDS[i]
-                    //     .1
-                    //     .fetch_add(now.elapsed().as_micros() as usize, Relaxed);
-                    return; // finished
-                }
-                assert!(self.to.len() >= progress.output);
-            } else {
-                // we got stolen, split off the part that is already finished
-                let r = cut_off_left(&mut self.left, progress.left);
-                let a = r;
-                let r = cut_off_left_mut(&mut self.right, progress.right);
-                let b = r;
-                let r = cut_off_left_mut(&mut self.to, progress.output);
-                let buffer = r;
-                assert_eq!(a.len() + b.len(), buffer.len());
-
-                //  try split the mergesort. For borrowing, we need to take the sort callback
-                let mut f = std::mem::replace(&mut self.f, None);
-                if let Some(f) = &mut f {
-                    rayon::join(|| self.spawn(steal_counter), || f.run());
-                    return;
-                };
-                let _ = std::mem::replace(&mut self.f, f);
-
-                // didn't work, just split the merge
-                self.spawn(steal_counter + 1 /* me */);
+            if merge.work_left() == 0 {
                 return;
+            };
+            if steal::get_my_steal_count() == 0 {
+                // || work_left < *SPLIT_THRESHOLD {
+                merge.merge();
+            // Do a part of the work
+            // merge.work_size = std::cmp::min(*MIN_MERGE_SIZE, merge.work_left);
+            // unsafe_manual_merge2(&mut progress, &self.left, &self.right, self.to);
+
+            // let i = ::rayon::current_thread_index().unwrap();
+            // use std::sync::atomic::Ordering::Relaxed;
+            // MERGE_SPEEDS[i].0.fetch_add(self.to.len(), Relaxed);
+            // MERGE_SPEEDS[i]
+            //     .1
+            //     .fetch_add(now.elapsed().as_micros() as usize, Relaxed);
+            // assert!(self.to.len() >= merge.output);
+            } else {
+                println!("Test");
+                let mut other = merge.split();
+                merge.merge();
+                // rayon::join(
+                //     || Merge::progressive_merge(&mut merge),
+                //     || Merge::progressive_merge(&mut other),
+                // );
+                return;
+                // // we got stolen, split off the part that is already finished
+                // let r = cut_off_left_mut(&mut self.left, progress.left);
+                // let a = r;
+                // let r = cut_off_left_mut(&mut self.right, progress.right);
+                // let b = r;
+                // let r = cut_off_left_mut(&mut self.to, progress.output);
+                // let buffer = r;
+                // assert_eq!(a.len() + b.len(), buffer.len());
+
+                // //  try split the mergesort. For borrowing, we need to take the sort callback
+                // let mut f = std::mem::replace(&mut self.f, None);
+                // if let Some(f) = &mut f {
+                //     rayon::join(|| self.spawn(steal_counter), || f.run());
+                //     return;
+                // };
+                // let _ = std::mem::replace(&mut self.f, f);
+
+                // // didn't work, just split the merge
+                // self.spawn(steal_counter + 1 /* me */);
+                // return;
             }
         }
     }
@@ -242,9 +280,9 @@ where
         {
             //recursive base case
             // finished splitting, let's just merge
-            rayon::subgraph("merging", self.to.len(), || {
-                self.two_merge();
-            });
+            // rayon::subgraph("merging", self.to.len(), || {
+            //     self.two_merge();
+            // });
             return;
         }
         if let Some(mut real_right) = self.real_right.take() {
@@ -255,7 +293,7 @@ where
             self.right = real_right;
         }
         // Split the inputs and buffer into steal_counter subslices
-        let left = &self.left;
+        let left = std::mem::replace(&mut self.left, &mut []);
         let right = std::mem::replace(&mut self.right, &mut []);
         let max_slice = std::cmp::max(left.len(), right.len());
 
@@ -271,7 +309,7 @@ where
         // find the splitting points in all splices
         let index_left = split_for_merge(left, &|a, b| a < b, &split_elem);
         let index_right = split_for_merge(right, &|a, b| a < b, &split_elem);
-        let (me_left, other_left) = left.split_at(index_left);
+        let (me_left, mut other_left) = left.split_at_mut(index_left);
         let (me_right, mut other_right) = right.split_at_mut(index_right);
         // let (me_real_right, other_real_right) = self
         //     .real_right
@@ -289,7 +327,7 @@ where
 
         let other_to = cut_off_right_mut(&mut self.to, me_left.len() + me_right.len());
         let mut other = Merge {
-            left: &other_left,
+            left: &mut other_left,
             right: &mut other_right,
             real_right: None,
             to: other_to,
@@ -302,10 +340,10 @@ where
         assert_eq!(self.left.len() + self.right.len(), self.to.len());
         assert_eq!(other.left.len() + other.right.len(), other.to.len());
 
-        rayon::join(
-            || self.spawn(steal_counter - 1),
-            || rayon::subgraph("merging", other.to.len(), || other.two_merge()),
-        );
+        // rayon::join(
+        //     || self.spawn(steal_counter - 1),
+        //     || rayon::subgraph("merging", other.to.len(), || other.two_merge()),
+        // );
     }
 }
 
