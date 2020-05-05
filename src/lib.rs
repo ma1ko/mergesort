@@ -220,6 +220,7 @@ where
         };
         // decide if we need to split even more: if the steal counter is high enough and theres
         // still elements left, we can do that
+        steal::reset_my_steal_count();
         if steal_counter.unwrap_or(0) < 2 || elem_left < 2 * *MIN_SPLIT_SIZE {
             rayon::join(|| self.mergesort(), || other.mergesort());
         } else {
@@ -253,10 +254,6 @@ where
             let buffer = cut_off_left(&mut self.to, work_size);
             // let merge = if self.offset.count_ones() % 2 == 0 {
             let merge = merge::MergeResult::new(piece, buffer, true, self.offset);
-            // } else {
-            // buffer.copy_from_slice(piece);
-            // merge::MergeResult::new(piece, buffer, false, self.offset)
-            // };
             self.offset += *MIN_BLOCK_SIZE;
             self.pieces.push(merge);
             // try merging pieces

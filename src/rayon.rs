@@ -24,21 +24,9 @@ where
     RB: Send,
 {
     #[cfg(feature = "logs")]
-    return rayon_logs::join(
-        {
-            steal::reset_my_steal_count();
-            oper_a
-        },
-        || oper_b(),
-    );
+    return rayon_logs::join(|| oper_a(), || oper_b());
     #[cfg(not(feature = "logs"))]
-    return rayon::join(
-        {
-            steal::reset_my_steal_count();
-            oper_a
-        },
-        || oper_b(),
-    );
+    return rayon::join(|| oper_a(), || oper_b());
 }
 
 #[allow(unused)]

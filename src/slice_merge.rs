@@ -55,21 +55,25 @@ where
                 // } else {
                 let mut other = self.split();
                 if steal_count > 2 {
+                    // divide in 4
+                    let mut self_other = self.split();
+                    let mut other_other = other.split();
                     rayon::join(
                         || {
-                            let mut other = self.split();
                             rayon::join(
-                                || self.progressive_merge(None),
+                                || {
+                                    rayon::join(
+                                        || {
+                                            steal::reset_my_steal_count();
+                                            self.progressive_merge(None)
+                                        },
+                                        || self_other.progressive_merge(None),
+                                    )
+                                },
                                 || other.progressive_merge(None),
                             )
                         },
-                        || {
-                            let mut other_other = other.split();
-                            rayon::join(
-                                || other.progressive_merge(None),
-                                || other_other.progressive_merge(None),
-                            );
-                        },
+                        || other_other.progressive_merge(None),
                     );
                 } else {
                     rayon::join(

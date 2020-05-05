@@ -4,8 +4,8 @@ use crate::slice_merge;
 lazy_static! {
     static ref MIN_MERGE_SIZE: usize = std::env::var("MERGESIZE")
         .map(|x| x.parse::<usize>().unwrap())
-        .unwrap_or(64);
-    static ref SPLIT_THRESHOLD: usize = 32 * 4 * *MIN_MERGE_SIZE;
+        .unwrap_or(1024);
+    static ref SPLIT_THRESHOLD: usize = 32 * *MIN_MERGE_SIZE;
     // pub static ref MERGE_SPEEDS: Vec<(AtomicUsize, AtomicUsize)> =
         // (0..num_cpus::get()).map(|_| Default::default()).collect();
 }
