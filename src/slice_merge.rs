@@ -1,3 +1,4 @@
+use crate::merge::Task;
 use crate::steal;
 use std::mem;
 use std::ptr;
@@ -40,14 +41,42 @@ where
             };
         }
     }
-    pub fn progressive_merge(&mut self) {
+    pub fn progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
         // let now = std::time::Instant::now();
         while self.work_left() != 0 {
-            if self.work_left() < self.work_size || steal::get_my_steal_count() == 0 {
+            let steal_count = steal::get_my_steal_count();
+            if self.work_left() < 32 * self.work_size || steal_count == 0 {
                 self.merge();
             } else {
+                let f = f.take();
+                // if let Some(f) = f {
+                //     println!("Taking");
+                //     rayon::join(|| self.progressive_merge(None), || f.run());
+                // } else {
                 let mut other = self.split();
-                rayon::join(|| self.progressive_merge(), || other.progressive_merge());
+                if steal_count > 2 {
+                    rayon::join(
+                        || {
+                            let mut other = self.split();
+                            rayon::join(
+                                || self.progressive_merge(None),
+                                || other.progressive_merge(None),
+                            )
+                        },
+                        || {
+                            let mut other_other = other.split();
+                            rayon::join(
+                                || other.progressive_merge(None),
+                                || other_other.progressive_merge(None),
+                            );
+                        },
+                    );
+                } else {
+                    rayon::join(
+                        || self.progressive_merge(f),
+                        || other.progressive_merge(None),
+                    );
+                }
             }
         }
     }
