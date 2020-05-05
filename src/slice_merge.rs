@@ -42,17 +42,11 @@ where
     }
     pub fn progressive_merge(&mut self) {
         // let now = std::time::Instant::now();
-        // assert_eq!(self.left.len() + self.right.len(), self.to.len());
-        // self.progress = Default::default();
-        // let mut progress = &mut self.progress;
         while self.work_left() != 0 {
             if self.work_left() < self.work_size || steal::get_my_steal_count() == 0 {
                 self.merge();
             } else {
-                // assert!(false);
                 let mut other = self.split();
-                // other.progressive_merge();
-                // self.progressive_merge();
                 rayon::join(|| self.progressive_merge(), || other.progressive_merge());
             }
         }
@@ -63,6 +57,7 @@ where
     }
     pub fn split(&mut self) -> SliceMerge<T> {
         unsafe {
+            // get back the slices
             let left = std::slice::from_raw_parts(
                 self.left,
                 (self.left_end as usize - self.left as usize) / mem::size_of::<T>(),
@@ -77,17 +72,12 @@ where
             );
             let (left_left, left_right) = left.split_at(left.len() / 2);
 
+            // split the right side at the same element than the left side
             let i = SliceMerge::split_for_merge(right, &*left_right.as_ptr());
             let (right_left, right_right) = right.split_at(i);
             let (output_left, output_right) =
                 output.split_at_mut(right_left.len() + left_left.len());
-            // assert_eq!(
-            //     left_mid as usize - self.left as usize + right_mid as usize - self.right as usize,
-            //     output_mid as usize - self.output as usize,
-            // );
-            // assert_eq!(left_mid as usize % 8, 0);
-            // assert_eq!(right_mid as usize % 8, 0);
-            // assert_eq!(output_mid as usize % 8, 0);
+            // create another merging task will all right side slices.
             let other = SliceMerge {
                 left: left_right.as_ptr(),
                 left_end: left_right.as_ptr().add(left_right.len()),
@@ -97,12 +87,10 @@ where
                 output_end: output_right.as_ptr().add(output_right.len()),
                 work_size: self.work_size,
             };
-            // self.print();
+            // just merge the left-side slices here
             self.left_end = self.left.add(left_left.len());
             self.right_end = self.right.add(right_left.len());
             self.output_end = self.output.add(output_left.len());
-            // self.print();
-            // other.print();
             return other;
         }
     }
@@ -119,21 +107,15 @@ where
         }
         a
     }
-    fn print(&self) {
-        println!(
-            "left: {:?} to {:?}, right: {:?} to {:?}, output: {:?} to {:?}",
-            self.left, self.left_end, self.right, self.right_end, self.output, self.output_end
-        );
-    }
+
     pub fn merge(&mut self) {
         assert!(self.output as *const T != self.output_end);
         unsafe {
-            let left_work_end = std::cmp::min(self.left_end, self.left.add(256));
-            let right_work_end = std::cmp::min(self.right_end, self.right.add(256));
+            let left_work_end = std::cmp::min(self.left_end, self.left.add(self.work_size));
+            let right_work_end = std::cmp::min(self.right_end, self.right.add(self.work_size));
             let mut left: *const T = self.left;
             let mut right: *const T = self.right;
             let mut output: *mut T = self.output;
-            // while self.left < left_work_end && self.right < right_work_end {
             while left < left_work_end && right < right_work_end {
                 let to_copy = if *left < *right {
                     get_and_increment(&mut left)
@@ -142,6 +124,7 @@ where
                 };
                 ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             }
+
             self.left = left;
             self.right = right;
             self.output = output;
