@@ -9,7 +9,7 @@ lazy_static! {
     // pub static ref MERGE_SPEEDS: Vec<(AtomicUsize, AtomicUsize)> =
         // (0..num_cpus::get()).map(|_| Default::default()).collect();
 }
-pub type RunTask = dyn FnMut() -> () + Sync + Send;
+// pub type RunTask = dyn FnMut() -> () + Sync + Send;
 pub trait Task: Send + Sync {
     // run self *and* me, or return false if you can't
     fn run(&mut self) -> bool;
@@ -57,7 +57,7 @@ where
 
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
         assert_eq!(self.in_data, other.in_data);
-        assert!(self.data.len() == other.data.len());
+        assert_eq!(self.data.len(), other.data.len());
         let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut data = fuse_slices(self.data, other.data);
 
@@ -70,7 +70,7 @@ where
         let mut merge =
             slice_merge::SliceMerge::new(left_data, right_data, &mut dst, *MIN_MERGE_SIZE);
 
-        merge.progressive_merge();
+        merge.progressive_merge(f);
         self.in_data = !self.in_data;
 
         // rayon::subgraph("merging", self.data.len(), || merge.two_merge());

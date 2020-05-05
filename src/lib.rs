@@ -185,7 +185,7 @@ where
                     let a = &mut self.pieces[index - 1];
                     // assert_eq!(a.offset % (a.len() * 2), 0);
                     assert_eq!(a.offset + a.len(), b.offset);
-                    assert_ne!(a.in_data, b.in_data);
+                    assert_eq!(a.in_data, b.in_data);
                     rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
                     index -= 1;
                 }
