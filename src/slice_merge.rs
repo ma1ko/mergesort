@@ -150,12 +150,19 @@ where
             let mut right: *const T = self.right;
             let mut output: *mut T = self.output;
             while left < left_work_end && right < right_work_end {
-                let to_copy = if *left < *right {
-                    get_and_increment(&mut left)
+                if *left < *right {
+                    *output = *right;
+                    // ptr::copy_nonoverlapping(left, output, 1);
+                    // get_and_increment(&mut left)
+                    left = left.add(1);
                 } else {
-                    get_and_increment(&mut right)
+                    *output = *right;
+                    // ptr::copy_nonoverlapping(right, output, 1);
+                    // get_and_increment(&mut right)
+                    right = right.add(1);
                 };
-                ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
+                output = output.add(1);
+                // ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             }
 
             self.left = left;
