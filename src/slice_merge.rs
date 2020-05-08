@@ -25,11 +25,11 @@ where
         unsafe {
             return SliceMerge {
                 left: left.as_ptr(),
-                left_end: (left.last().unwrap() as *const T).add(1),
+                left_end: left.as_ptr().add(left.len()),
                 right: right.as_ptr(),
-                right_end: (right.last().unwrap() as *const T).add(1),
+                right_end: right.as_ptr().add(right.len()),
                 output: output.as_mut_ptr(),
-                output_end: (output.last().unwrap() as *const T).add(1),
+                output_end: output.as_ptr().add(output.len()),
                 work_size,
             };
         }
@@ -79,23 +79,16 @@ where
     }
 
     pub fn work_left(&self) -> usize {
-        return (self.output_end as usize - self.output as usize) / mem::size_of::<T>();
+        return diff(self.output, self.output_end);
     }
     pub fn split(&mut self) -> SliceMerge<T> {
+        use std::slice::{from_raw_parts, from_raw_parts_mut};
         unsafe {
             // get back the slices
-            let left = std::slice::from_raw_parts(
-                self.left,
-                (self.left_end as usize - self.left as usize) / mem::size_of::<T>(),
-            );
-            let right = std::slice::from_raw_parts(
-                self.right,
-                (self.right_end as usize - self.right as usize) / mem::size_of::<T>(),
-            );
-            let output = std::slice::from_raw_parts_mut(
-                self.output,
-                (self.output_end as usize - self.output as usize) / mem::size_of::<T>(),
-            );
+            let left = from_raw_parts(self.left, diff(self.left, self.left_end));
+            let right = from_raw_parts(self.right, diff(self.right, self.right_end));
+            let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
+            // split on side at half (we might want to split the bigger side (?)
             let (left_left, left_right) = left.split_at(left.len() / 2);
 
             // split the right side at the same element than the left side
@@ -150,19 +143,17 @@ where
                 };
                 ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             }
-
             self.left = left;
             self.right = right;
             self.output = output;
-
             if self.left < self.left_end && self.right < self.right_end {
+                // no side is finished yet
                 return;
             };
-            // assert!(self.left < self.left_end || self.right < self.right_end);
-            let len = (self.right_end as usize - self.right as usize) / mem::size_of::<T>();
-            ptr::copy_nonoverlapping(self.right, self.output, len);
-            let len = (self.left_end as usize - self.left as usize) / mem::size_of::<T>();
-            ptr::copy_nonoverlapping(self.left, self.output, len);
+            // one side is finished, copy over the remainder from the other side
+            assert!(self.left < self.left_end || self.right < self.right_end);
+            ptr::copy_nonoverlapping(self.right, self.output, diff(self.right, self.right_end));
+            ptr::copy_nonoverlapping(self.left, self.output, diff(self.left, self.left_end));
             self.output = self.output_end as *mut T;
 
             pub unsafe fn get_and_increment_mut<T>(ptr: &mut *mut T) -> *mut T {
@@ -177,4 +168,9 @@ where
             }
         }
     }
+}
+// difference between two pointer (it's in  std::ptr but only on nightly)
+fn diff<T>(left: *const T, right: *const T) -> usize {
+    assert!(right as usize >= left as usize);
+    (right as usize - left as usize) / mem::size_of::<T>()
 }
