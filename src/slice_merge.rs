@@ -16,6 +16,7 @@ where
     pub work_size: usize,
 }
 unsafe impl<T> Send for SliceMerge<T> where T: Copy + Ord {}
+unsafe impl<T> Sync for SliceMerge<T> where T: Copy + Ord {}
 impl<T> SliceMerge<T>
 where
     T: Copy + Ord,
@@ -34,7 +35,7 @@ where
             };
         }
     }
-    pub fn progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
+    pub fn _progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
         // let now = std::time::Instant::now();
         while self.work_left() != 0 {
             let steal_count = steal::get_my_steal_count();
@@ -75,6 +76,14 @@ where
                     );
                 }
             }
+        }
+    }
+    pub fn progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
+        while self.work_left() > 0 {
+            if self.check() {
+                return;
+            }
+            self.merge();
         }
     }
 
@@ -169,6 +178,27 @@ where
         }
     }
 }
+
+impl<T> Task for SliceMerge<T>
+where
+    T: Copy + Ord,
+{
+    fn run(&mut self, parent: Option<&mut dyn Task>) -> () {
+        self.progressive_merge(parent);
+    }
+
+    fn split(&mut self) -> Self {
+        SliceMerge::split(self)
+    }
+    fn can_split(&self) -> bool {
+        return self.work_left() > self.work_size * 32;
+    }
+
+    fn fuse(&mut self, _other: Self) -> () {
+        // Nothing to do here?
+    }
+}
+
 // difference between two pointer (it's in  std::ptr but only on nightly)
 fn diff<T>(left: *const T, right: *const T) -> usize {
     assert!(right as usize >= left as usize);

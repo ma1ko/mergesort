@@ -9,22 +9,45 @@ pub trait Task: Send + Sync {
     where
         Self: Sized;
     fn can_split(&self) -> bool;
-    fn split_or_run(&mut self, _steal_counter: Option<usize>) -> ()
+    fn split_run(&mut self, steal_counter: usize)
     where
         Self: Sized,
     {
         let mut other = self.split();
-        steal::reset_my_steal_count();
-        // if steal_counter.unwrap_or(0) < 2
-        /* || elem_left < 2 * *MIN_SPLIT_SIZE */
-        // {
-            rayon::join(|| self.run(None), || other.run(None));
-        // } else {
-            // rayon::join(|| self.split(), || other.split());
-        // }
+
+        if steal_counter < 2 {
+            rayon::join(
+                || {
+                    steal::reset_my_steal_count();
+                    self.run(None)
+                },
+                || other.run(None),
+            );
+        } else {
+            rayon::join(
+                || self.split_run(steal_counter / 2),
+                || other.split_run(steal_counter / 2),
+            );
+        }
 
         self.fuse(other);
         // self.run(None); // Other has one element, we can try to merge that to self
+    }
+    fn check(&mut self) -> bool
+    where
+        Self: Sized,
+    {
+        let steal_counter = steal::get_my_steal_count();
+        if steal_counter == 0 {
+            return false;
+            // return Some(self);
+        }
+        if !self.can_split() {
+            return false;
+            // return Some(self);
+        }
+        self.split_run(steal_counter);
+        true
     }
     fn fuse(&mut self, _other: Self) -> ()
     where

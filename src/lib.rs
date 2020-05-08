@@ -71,10 +71,8 @@ where
     let in_data = mergesort.pieces[0].in_data;
 
     if !in_data {
-        rayon::subgraph("merging", tmp_slice.len(), || {
-            unsafe {
-                std::ptr::copy_nonoverlapping(tmp_slice.as_ptr(), data.as_mut_ptr(), data.len());
-            }
+        rayon::subgraph("merging", tmp_slice.len(), || unsafe {
+            std::ptr::copy_nonoverlapping(tmp_slice.as_ptr(), data.as_mut_ptr(), data.len());
         });
     };
     // keep the buffer size to 0 so it doesn't deallocate anything
@@ -231,18 +229,21 @@ where
         return other;
     }
 
-    fn mergesort(self: &mut Self) {
+    fn mergesort(&mut self) {
         assert!(!self.data.is_empty());
         assert_eq!(self.data.len(), self.to.len());
         while !self.data.is_empty() {
-            let elem_left = self.data.len();
-            let steal_counter = steal::get_my_steal_count();
-            if steal_counter > 0 && elem_left > *MIN_SPLIT_SIZE {
-                self.split_or_run(Some(steal_counter));
+            // let steal_counter = steal::get_my_steal_count();
+            // if steal_counter > 0 && elem_left > *MIN_SPLIT_SIZE {
+            //     self.split_or_run(Some(steal_counter));
+            //     return;
+            // }
+            if self.check() {
                 return;
-            }
+            };
+            let elem_left = self.data.len();
             // Do some work: Split off and sort piece
-            assert!(elem_left >= *MIN_BLOCK_SIZE);
+            // assert!(elem_left >= *MIN_BLOCK_SIZE);
             let work_size = std::cmp::min(*MIN_BLOCK_SIZE, elem_left);
             let piece = cut_off_left(&mut self.data, work_size);
             rayon::subgraph("actual sort", *MIN_BLOCK_SIZE, || piece.sort());

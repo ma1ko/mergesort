@@ -67,7 +67,7 @@ where
         let mut merge =
             slice_merge::SliceMerge::new(left_data, right_data, &mut dst, *MIN_MERGE_SIZE);
 
-        merge.progressive_merge(f);
+        merge.run(f);
         self.in_data = !self.in_data;
 
         // rayon::subgraph("merging", self.data.len(), || merge.two_merge());
@@ -75,6 +75,35 @@ where
         self.buffer = buffer;
     }
 }
+
+// impl<'a, T> Task for MergeResult<'a,T>
+// where
+//     T: Ord + Sync + Send + Copy + std::fmt::Debug {
+
+//     fn run(&mut self, parent: Option<&mut dyn task::Task>) {
+//         self.merge(self, f);
+
+//     }
+
+//  fn split(&mut self) -> Self {
+//         merge::split(self, None)
+//     }
+//     fn can_split(&self) -> bool {
+//         return self.data.len() > *MIN_SPLIT_SIZE;
+//     }
+//     fn fuse(&mut self, mut other: Self) {
+//         // println!("Fusing");
+//         // assert!(
+//         //     other.pieces.len() <= 1,
+//         //     format!("Fail:{:?}", other.pieces_len())
+//         // );
+
+//         self.pieces.append(&mut other.pieces);
+//         self.merge();
+//     }
+
+//     }
+
 pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T]) -> &'c mut [T] {
     let ptr1 = s1.as_mut_ptr();
     unsafe {
