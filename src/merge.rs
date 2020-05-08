@@ -1,4 +1,5 @@
 use crate::slice_merge;
+pub use crate::task::Task;
 // use std::sync::atomic::AtomicUsize;
 
 lazy_static! {
@@ -10,10 +11,6 @@ lazy_static! {
         // (0..num_cpus::get()).map(|_| Default::default()).collect();
 }
 // pub type RunTask = dyn FnMut() -> () + Sync + Send;
-pub trait Task: Send + Sync {
-    // run self *and* me, or return false if you can't
-    fn run(&mut self) -> bool;
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>

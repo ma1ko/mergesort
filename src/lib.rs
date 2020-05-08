@@ -5,7 +5,9 @@ pub mod merge;
 pub mod rayon;
 mod slice_merge;
 pub mod steal;
+pub mod task;
 
+use crate::task::Task;
 lazy_static! {
     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
         .map(|x| x.parse::<usize>().unwrap())
@@ -14,7 +16,7 @@ lazy_static! {
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(22))
+        .take(2usize.pow(20))
         .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -40,7 +42,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn mergesort<T>(data: &mut [T])
 where
-    T: Ord + Sync + Send + Copy + Default + std::fmt::Debug,
+    T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     let mut tmp_slice: Vec<T> = Vec::with_capacity(data.len());
     unsafe { tmp_slice.set_len(data.len()) }
@@ -50,7 +52,7 @@ where
         pieces: Vec::new(),
         offset: 0,
     };
-    mergesort.mergesort();
+    mergesort.run(None);
     // use std::sync::atomic::Ordering;
     // for (x, t) in &*merge::MERGE_SPEEDS {
     //        let (x, t) = (x.load(Ordering::Relaxed), t.load(Ordering::Relaxed));
@@ -70,9 +72,14 @@ where
 
     if !in_data {
         rayon::subgraph("merging", tmp_slice.len(), || {
-            tmp_slice.iter().zip(data).for_each(|(t, b)| *b = *t);
+            unsafe {
+                std::ptr::copy_nonoverlapping(tmp_slice.as_ptr(), data.as_mut_ptr(), data.len());
+            }
         });
     };
+    // keep the buffer size to 0 so it doesn't deallocate anything
+    // see : https://doc.rust-lang.org/src/alloc/slice.rs.html#966
+    unsafe { tmp_slice.set_len(0) };
 }
 // from https://stackoverflow.com/questions/42162151/rust-error-e0495-using-split-at-mut-in-a-closure
 fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
@@ -193,13 +200,15 @@ where
         }
     }
 
-    fn split(self: &mut Self, steal_counter: Option<usize>) -> bool {
+    fn split(self: &mut Self, _steal_counter: Option<usize>) -> Self {
+        // println!("Splitting");
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
         if elem_left < *MIN_SPLIT_SIZE {
-            self.mergesort();
+            assert!(false);
+            // self.mergesort();
             // if we split in two, each block should have at least MIN_BLOCK_SIZE elements
-            return false;
+            // return false;
         }
         // we want to split off about half the slice, but also the right part needs to be a
         // power of two, so we take the slice, find the next power of two, and give half of
@@ -212,28 +221,14 @@ where
         // println!("Splitting {} in {} vs {}", total, a.len() + index, b.len());
 
         // Other side
-        let mut other: Mergesort<'a, T> = Mergesort {
+        let other: Mergesort<'a, T> = Mergesort {
             pieces: Vec::new(),
             data: right_data,
             to: right_to,
             offset: self.offset + (elem_left - split_index),
         };
-        // decide if we need to split even more: if the steal counter is high enough and theres
-        // still elements left, we can do that
-        steal::reset_my_steal_count();
-        if steal_counter.unwrap_or(0) < 2 || elem_left < 2 * *MIN_SPLIT_SIZE {
-            rayon::join(|| self.mergesort(), || other.mergesort());
-        } else {
-            rayon::join(|| self.split(None), || other.split(None));
-        }
-        assert!(
-            other.pieces.len() <= 1,
-            format!("Fail:{:?}", other.pieces_len())
-        );
 
-        self.pieces.append(&mut other.pieces);
-        self.merge(); // Other has one element, we can try to merge that to self
-        return true;
+        return other;
     }
 
     fn mergesort(self: &mut Self) {
@@ -243,7 +238,7 @@ where
             let elem_left = self.data.len();
             let steal_counter = steal::get_my_steal_count();
             if steal_counter > 0 && elem_left > *MIN_SPLIT_SIZE {
-                self.split(Some(steal_counter));
+                self.split_or_run(Some(steal_counter));
                 return;
             }
             // Do some work: Split off and sort piece
@@ -266,52 +261,39 @@ impl<'a, T> merge::Task for Mergesort<'a, T>
 where
     T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
-    fn run(&mut self) -> bool {
-        if self.data.is_empty() {
-            return false;
-        };
-        if self.data.len() < *MIN_SPLIT_SIZE {
-            self.mergesort();
-            return true;
-        }
-        // Put in a new vector to sort on
-        let pieces = std::mem::replace(&mut self.pieces, Vec::new());
+    fn run(&mut self, parent: Option<&mut dyn task::Task>) {
+        self.mergesort();
+        // if self.data.is_empty() {
+        //     return;
+        // };
+        // if self.data.len() < *MIN_SPLIT_SIZE {
+        //     self.mergesort();
+        //     return;
+        // }
+        // // Put in a new vector to sort on
+        // let pieces = std::mem::replace(&mut self.pieces, Vec::new());
 
-        // TODO: get split counter
-        self.split(None);
-        let mut new = std::mem::replace(&mut self.pieces, pieces);
-        // Merge back the other elements
-        self.pieces.append(&mut new);
-        return true;
+        // // TODO: get split counter
+        // // self.split(None);
+        // let mut new = std::mem::replace(&mut self.pieces, pieces);
+        // // Merge back the other elements
+        // self.pieces.append(&mut new);
+        // return ;
+    }
+    fn split(&mut self) -> Self {
+        Mergesort::split(self, None)
+    }
+    fn can_split(&self) -> bool {
+        return self.data.len() > *MIN_SPLIT_SIZE;
+    }
+    fn fuse(&mut self, mut other: Self) {
+        // println!("Fusing");
+        // assert!(
+        //     other.pieces.len() <= 1,
+        //     format!("Fail:{:?}", other.pieces_len())
+        // );
+
+        self.pieces.append(&mut other.pieces);
+        self.merge();
     }
 }
-// Mabye we can rewrite it a bit more like that
-// pub fn recursive_join<I, T, F>(it: I, f: F)
-// where
-//     T: Send,
-//     I: Iterator<Item = T> + Send,
-//     F: Fn(T) + Send + Sync,
-// {
-//     let it = it.into_iter();
-//     fn spawn<I, T, F>(mut it: I, f: F)
-//     where
-//         T: Send,
-//         I: Iterator<Item = T> + Send,
-//         F: Fn(T) + Send + Sync,
-//     {
-//         match it.next() {
-//             None => {}
-//             Some(t) => {
-//                 rayon_logs::join(
-//                     || {
-//                         spawn(it, &f);
-//                     },
-//                     || {
-//                         f(t);
-//                     },
-//                 );
-//             }
-//         };
-//     }
-//     spawn(it, f);
-// }

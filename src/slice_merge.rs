@@ -2,14 +2,7 @@ use crate::merge::Task;
 use crate::steal;
 use std::mem;
 use std::ptr;
-/// Merges non-decreasing runs `v[..mid]` and `v[mid..]` using `buf` as temporary storage, and
-/// stores the result into `v[..]`.
-///
-/// # Safety
-///
-/// The two slices must be non-empty and `mid` must be in bounds. Buffer `buf` must be long enough
-/// to hold a copy of the shorter slice. Also, `T` must not be a zero-sized type.
-#[derive(Debug)]
+
 pub struct SliceMerge<T>
 where
     T: Copy + Ord,
@@ -37,7 +30,7 @@ where
                 right_end: (right.last().unwrap() as *const T).add(1),
                 output: output.as_mut_ptr(),
                 output_end: (output.last().unwrap() as *const T).add(1),
-                work_size: work_size,
+                work_size,
             };
         }
     }
