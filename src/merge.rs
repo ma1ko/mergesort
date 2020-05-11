@@ -10,7 +10,6 @@ lazy_static! {
     // pub static ref MERGE_SPEEDS: Vec<(AtomicUsize, AtomicUsize)> =
         // (0..num_cpus::get()).map(|_| Default::default()).collect();
 }
-// pub type RunTask = dyn FnMut() -> () + Sync + Send;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>
@@ -19,7 +18,6 @@ where
 {
     pub data: &'a mut [T], // that's where it starts and should be after it's merged
     pub buffer: &'a mut [T], // that's where it temporarily might be
-    pub in_data: bool,     // true if the sorted data is in the data, false if it's in the buffer
     pub offset: usize,     // index in total
 }
 
@@ -27,25 +25,12 @@ impl<'a, T> MergeResult<'a, T>
 where
     T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
-    pub fn new(
-        data: &'a mut [T],
-        buffer: &'a mut [T],
-        in_data: bool,
-        offset: usize,
-    ) -> MergeResult<'a, T> {
+    pub fn new(data: &'a mut [T], buffer: &'a mut [T], offset: usize) -> MergeResult<'a, T> {
         assert_eq!(data.len(), buffer.len());
         MergeResult {
             data,
             buffer,
-            in_data,
             offset,
-        }
-    }
-    pub fn location(self: &'a Self) -> &'a [T] {
-        if self.in_data {
-            self.data
-        } else {
-            self.buffer
         }
     }
     pub fn len(self: &Self) -> usize {
@@ -53,56 +38,28 @@ where
     }
 
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
-        assert_eq!(self.in_data, other.in_data);
+        // assert_eq!(self.in_data, other.in_data);
         assert_eq!(self.data.len(), other.data.len());
         let mut buffer = fuse_slices(self.buffer, other.buffer);
-        let mut data = fuse_slices(self.data, other.data);
 
-        let (src, mut dst) = if self.in_data {
-            (&mut data, &mut buffer)
-        } else {
-            (&mut buffer, &mut data)
-        };
-        let (left_data, right_data) = &mut src.split_at_mut(self.data.len());
+        // let (src, mut dst) = if self.in_data {
+        //     (&mut data, &mut buffer)
+        // } else {
+        //     (&mut buffer, &mut data)
+        // };
+        // let (left_data, right_data) = &mut data.split_at_mut(self.data.len());
         let mut merge =
-            slice_merge::SliceMerge::new(left_data, right_data, &mut dst, *MIN_MERGE_SIZE);
+            slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, *MIN_MERGE_SIZE);
 
         merge.run(f);
-        self.in_data = !self.in_data;
 
-        // rayon::subgraph("merging", self.data.len(), || merge.two_merge());
-        self.data = data;
-        self.buffer = buffer;
+        let data = fuse_slices(self.data, other.data);
+        // std::mem::swap(&mut self.data, &mut self.buffer);
+
+        self.data = buffer;
+        self.buffer = data;
     }
 }
-
-// impl<'a, T> Task for MergeResult<'a,T>
-// where
-//     T: Ord + Sync + Send + Copy + std::fmt::Debug {
-
-//     fn run(&mut self, parent: Option<&mut dyn task::Task>) {
-//         self.merge(self, f);
-
-//     }
-
-//  fn split(&mut self) -> Self {
-//         merge::split(self, None)
-//     }
-//     fn can_split(&self) -> bool {
-//         return self.data.len() > *MIN_SPLIT_SIZE;
-//     }
-//     fn fuse(&mut self, mut other: Self) {
-//         // println!("Fusing");
-//         // assert!(
-//         //     other.pieces.len() <= 1,
-//         //     format!("Fail:{:?}", other.pieces_len())
-//         // );
-
-//         self.pieces.append(&mut other.pieces);
-//         self.merge();
-//     }
-
-//     }
 
 pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T]) -> &'c mut [T] {
     let ptr1 = s1.as_mut_ptr();

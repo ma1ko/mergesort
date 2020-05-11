@@ -11,7 +11,7 @@ use crate::task::Task;
 lazy_static! {
     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
         .map(|x| x.parse::<usize>().unwrap())
-        .unwrap_or(2usize.pow(8));
+        .unwrap_or(2usize.pow(10));
     static ref MIN_SPLIT_SIZE: usize = 32 * *MIN_BLOCK_SIZE;
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,12 +40,19 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test]
+pub fn test() -> Result<(), Box<dyn std::error::Error>> {
+    main()
+}
+
 pub fn mergesort<T>(data: &mut [T])
 where
     T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     let mut tmp_slice: Vec<T> = Vec::with_capacity(data.len());
     unsafe { tmp_slice.set_len(data.len()) }
+    let data_ptr = data.as_mut_ptr();
+    let len = data.len();
     let mut mergesort = Mergesort {
         data,
         to: &mut tmp_slice,
@@ -68,16 +75,20 @@ where
         mergesort.pieces.len() == 1,
         format!("{:?}", mergesort.pieces_len())
     );
-    let in_data = mergesort.pieces[0].in_data;
 
-    if !in_data {
+    assert!(mergesort.data.windows(2).all(|w| w[0] <= w[1]));
+    // we need to check where the output landed, it's either in the original data or in the
+    // buffer. If it's in the buffer, we need to copy it over
+    if data_ptr != mergesort.pieces[0].data.as_mut_ptr() {
         rayon::subgraph("merging", tmp_slice.len(), || unsafe {
-            std::ptr::copy_nonoverlapping(tmp_slice.as_ptr(), data.as_mut_ptr(), data.len());
+            std::ptr::copy_nonoverlapping(tmp_slice.as_ptr(), data_ptr, len);
         });
     };
     // keep the buffer size to 0 so it doesn't deallocate anything
     // see : https://doc.rust-lang.org/src/alloc/slice.rs.html#966
-    unsafe { tmp_slice.set_len(0) };
+    unsafe {
+        tmp_slice.set_len(0);
+    }
 }
 // from https://stackoverflow.com/questions/42162151/rust-error-e0495-using-split-at-mut-in-a-closure
 fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
@@ -110,20 +121,6 @@ where
         // mostly for debugging
         self.pieces.iter().map(|x| x.len()).collect()
     }
-    fn _check(&self) {
-        // check that the pieces are correct
-        self.pieces.windows(2).for_each(|v| {
-            let ptr1 = v[0].data.as_ptr();
-            assert_eq!(
-                unsafe { ptr1.add(v[0].data.len()) } as *const T,
-                v[1].data.as_ptr()
-            );
-        });
-        assert!(
-            self.pieces_len().windows(2).all(|w| w[0] >= w[1]),
-            format!("After:{:?}", self.pieces_len(),)
-        );
-    }
     fn merge(&mut self)
     where
         T: Ord + Sync + Send + Copy,
@@ -142,11 +139,9 @@ where
                 let mut a: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 // that's where it needs to be inserted again
                 let index = self.pieces.len();
-                assert_eq!(a.in_data, b.in_data);
                 assert_eq!(a.offset + a.len(), b.offset);
 
                 rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
-                // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, None));
 
                 self.pieces.insert(index, a);
                 // We inserted the element, we need to check with the neighbors
@@ -161,6 +156,7 @@ where
         }
     }
     fn merge_index(&mut self, mut index: usize) {
+        assert!(false);
         // merge neighbors of the sorted piece at index i
         let mut change = true;
         while change {
@@ -175,9 +171,7 @@ where
                 change = true;
                 let b = self.pieces.remove(index + 1);
                 let a = &mut self.pieces[index];
-                // assert_eq!(a.offset % (a.len() * 2), 0);
                 assert_eq!(a.offset + a.len(), b.offset);
-                assert_eq!(a.in_data, b.in_data);
                 rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
             } else {
                 if index > 0
@@ -190,7 +184,7 @@ where
                     let a = &mut self.pieces[index - 1];
                     // assert_eq!(a.offset % (a.len() * 2), 0);
                     assert_eq!(a.offset + a.len(), b.offset);
-                    assert_eq!(a.in_data, b.in_data);
+                    // assert_eq!(a.in_data, b.in_data);
                     rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
                     index -= 1;
                 }
@@ -202,12 +196,6 @@ where
         // println!("Splitting");
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
-        if elem_left < *MIN_SPLIT_SIZE {
-            assert!(false);
-            // self.mergesort();
-            // if we split in two, each block should have at least MIN_BLOCK_SIZE elements
-            // return false;
-        }
         // we want to split off about half the slice, but also the right part needs to be a
         // power of two, so we take the slice, find the next power of two, and give half of
         // that to the other task. That means the other task will get more work.
@@ -240,7 +228,7 @@ where
             // }
             if self.check() {
                 return;
-            };
+            }
             let elem_left = self.data.len();
             // Do some work: Split off and sort piece
             // assert!(elem_left >= *MIN_BLOCK_SIZE);
@@ -248,8 +236,7 @@ where
             let piece = cut_off_left(&mut self.data, work_size);
             rayon::subgraph("actual sort", *MIN_BLOCK_SIZE, || piece.sort());
             let buffer = cut_off_left(&mut self.to, work_size);
-            // let merge = if self.offset.count_ones() % 2 == 0 {
-            let merge = merge::MergeResult::new(piece, buffer, true, self.offset);
+            let merge = merge::MergeResult::new(piece, buffer, self.offset);
             self.offset += *MIN_BLOCK_SIZE;
             self.pieces.push(merge);
             // try merging pieces
@@ -262,24 +249,9 @@ impl<'a, T> merge::Task for Mergesort<'a, T>
 where
     T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
-    fn run(&mut self, parent: Option<&mut dyn task::Task>) {
+    fn run(&mut self, _parent: Option<&mut dyn task::Task>) {
         self.mergesort();
-        // if self.data.is_empty() {
-        //     return;
-        // };
-        // if self.data.len() < *MIN_SPLIT_SIZE {
-        //     self.mergesort();
-        //     return;
-        // }
-        // // Put in a new vector to sort on
-        // let pieces = std::mem::replace(&mut self.pieces, Vec::new());
 
-        // // TODO: get split counter
-        // // self.split(None);
-        // let mut new = std::mem::replace(&mut self.pieces, pieces);
-        // // Merge back the other elements
-        // self.pieces.append(&mut new);
-        // return ;
     }
     fn split(&mut self) -> Self {
         Mergesort::split(self, None)
@@ -288,12 +260,6 @@ where
         return self.data.len() > *MIN_SPLIT_SIZE;
     }
     fn fuse(&mut self, mut other: Self) {
-        // println!("Fusing");
-        // assert!(
-        //     other.pieces.len() <= 1,
-        //     format!("Fail:{:?}", other.pieces_len())
-        // );
-
         self.pieces.append(&mut other.pieces);
         self.merge();
     }
