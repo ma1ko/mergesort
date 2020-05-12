@@ -15,6 +15,7 @@ crossbeam-utils = "*"
 rand = "*"
 itertools = "*"
 num_cpus = "*"
+num = "*"
 
 [dev-dependencies]
 criterion = {git = "https://github.com/ma1ko/criterion.rs"}

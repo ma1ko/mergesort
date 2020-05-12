@@ -4,6 +4,7 @@ use mergesort::{mergesort, steal};
 use rayon::prelude::*;
 #[macro_use]
 extern crate lazy_static;
+extern crate num;
 extern crate rand;
 lazy_static! {
     static ref V: Vec<u32> = std::iter::repeat_with(rand::random)
@@ -230,7 +231,7 @@ fn bench(c: &mut Criterion) {
         // .map(|x: u32| x % 1_000_000)
         .collect();
     // let v_21: Vec<u32> = std::iter::repeat_with(rand::random)
-    //     .take(2usize.pow(21))
+    //     .take(2usize.pow(20))
     //     .map(|x: u32| x % 1_000_000)
     //     .collect();
 
