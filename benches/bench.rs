@@ -4,7 +4,6 @@ use mergesort::{mergesort, steal};
 use rayon::prelude::*;
 #[macro_use]
 extern crate lazy_static;
-extern crate num;
 extern crate rand;
 lazy_static! {
     static ref V: Vec<u32> = std::iter::repeat_with(rand::random)
