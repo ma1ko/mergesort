@@ -15,7 +15,7 @@ pub trait Task: Send + Sync {
     {
         let mut other = self.split();
 
-        if steal_counter < 2 {
+        // if steal_counter < 2 {
             rayon::join(
                 || {
                     steal::reset_my_steal_count();
@@ -23,12 +23,15 @@ pub trait Task: Send + Sync {
                 },
                 || other.run(None),
             );
-        } else {
-            rayon::join(
-                || self.split_run(steal_counter / 2),
-                || other.split_run(steal_counter / 2),
-            );
-        }
+        // } else {
+        //     rayon::join(
+        //         || {
+        //             steal::reset_my_steal_count();
+        //             self.split_run(steal_counter / 2)
+        //         },
+        //         || other.split_run(steal_counter / 2),
+        //     );
+        // }
 
         self.fuse(other);
         // self.run(None); // Other has one element, we can try to merge that to self

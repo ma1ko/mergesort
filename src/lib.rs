@@ -16,7 +16,7 @@ lazy_static! {
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20))
+        .take(2usize.pow(24) + 2usize.pow(10))
         .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -72,9 +72,14 @@ where
     // println!("Result: {:?}", mergesort.pieces_len());
 
     assert!(
-        mergesort.pieces.len() == 1,
+        mergesort.pieces.len() <= 2,
         format!("{:?}", mergesort.pieces_len())
     );
+    if mergesort.pieces.len() > 1 {
+        let other =mergesort.pieces.pop().unwrap();
+        mergesort.pieces[0].merge(other, None);
+
+    }
 
     assert!(mergesort.data.windows(2).all(|w| w[0] <= w[1]));
     // we need to check where the output landed, it's either in the original data or in the
@@ -130,7 +135,8 @@ where
             let len = self.pieces.len();
             let a = &self.pieces[len - 2];
             let b = &self.pieces[len - 1];
-            if a.len() == b.len() && a.offset % (a.len() * 2) == 0 {
+            if a.len() == b.len() {
+                // && a.offset % (a.len() * 2) == 0 {
                 // we can merge, remove last item
 
                 let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
@@ -199,11 +205,18 @@ where
         // we want to split off about half the slice, but also the right part needs to be a
         // power of two, so we take the slice, find the next power of two, and give half of
         // that to the other task. That means the other task will get more work.
-        let split_index = elem_left.next_power_of_two() / 2;
+        let already_done = self.pieces_len().iter().sum::<usize>();
+        let total = already_done + elem_left;
+        let split_index = self.next(already_done.max(total.next_power_of_two() / 2));
+        // println!(
+        //     "Done: {}, total: {}, splitting at {}",
+        //     already_done, total, split_index
+        // );
+        // let split_index = elem_left.next_power_of_two() / 2;
 
         // split off a part for the other task
-        let right_to = cut_off_right(&mut self.to, elem_left - split_index);
-        let right_data = cut_off_right(&mut self.data, elem_left - split_index);
+        let right_to = cut_off_right(&mut self.to, split_index - already_done);
+        let right_data = cut_off_right(&mut self.data, split_index - already_done);
         // println!("Splitting {} in {} vs {}", total, a.len() + index, b.len());
 
         // Other side
@@ -211,14 +224,27 @@ where
             pieces: Vec::new(),
             data: right_data,
             to: right_to,
-            offset: self.offset + (elem_left - split_index),
+            offset: self.offset + split_index - already_done,
         };
 
         return other;
     }
+    fn next(&self, i: usize) -> usize {
+        let mut highest = i.next_power_of_two() / 2;
+        // find first zero
+        while highest != 0 && i | highest == i {
+            highest /= 2;
+        }
+        let result = i & !(highest - 1);
+        if i != result {
+            result | highest
+        } else {
+            result
+        }
+    }
 
     fn mergesort(&mut self) {
-        assert!(!self.data.is_empty());
+        // assert!(!self.data.is_empty());
         assert_eq!(self.data.len(), self.to.len());
         while !self.data.is_empty() {
             // let steal_counter = steal::get_my_steal_count();
@@ -251,7 +277,6 @@ where
 {
     fn run(&mut self, _parent: Option<&mut dyn task::Task>) {
         self.mergesort();
-
     }
     fn split(&mut self) -> Self {
         Mergesort::split(self, None)
@@ -260,6 +285,10 @@ where
         return self.data.len() > *MIN_SPLIT_SIZE;
     }
     fn fuse(&mut self, mut other: Self) {
+        // assert!(other.pieces.len() == 1, format!("{:?}", other.pieces_len()));
+        // assert_eq!(other.pieces[0].len(), self.pieces.last().unwrap().len());
+        // let other = other.pieces.pop().unwrap();
+        // self.pieces.last_mut().unwrap().merge(other, None);
         self.pieces.append(&mut other.pieces);
         self.merge();
     }

@@ -39,7 +39,10 @@ where
 
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
         // assert_eq!(self.in_data, other.in_data);
-        assert_eq!(self.data.len(), other.data.len());
+        // assert_eq!(self.data.len(), other.data.len());
+        // if self.data.len() != other.data.len() {
+        //     println!("Uneven merge: {} and {}", self.data.len(), other.data.len());
+        // }
         let mut buffer = fuse_slices(self.buffer, other.buffer);
 
         // let (src, mut dst) = if self.in_data {
