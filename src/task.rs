@@ -16,13 +16,13 @@ pub trait Task: Send + Sync {
         let mut other = self.split();
 
         // if steal_counter < 2 {
-            rayon::join(
-                || {
-                    steal::reset_my_steal_count();
-                    self.run(None)
-                },
-                || other.run(None),
-            );
+        rayon::join(
+            || {
+                steal::reset_my_steal_count();
+                self.run(None)
+            },
+            || other.run(None),
+        );
         // } else {
         //     rayon::join(
         //         || {

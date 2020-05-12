@@ -36,6 +36,9 @@ where
     pub fn len(self: &Self) -> usize {
         return self.data.len();
     }
+    pub fn is_sorted(self: &Self) -> bool {
+        self.data.windows(2).all(|w| w[0] <= w[1])
+    }
 
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
         // assert_eq!(self.in_data, other.in_data);
@@ -44,20 +47,12 @@ where
         //     println!("Uneven merge: {} and {}", self.data.len(), other.data.len());
         // }
         let mut buffer = fuse_slices(self.buffer, other.buffer);
-
-        // let (src, mut dst) = if self.in_data {
-        //     (&mut data, &mut buffer)
-        // } else {
-        //     (&mut buffer, &mut data)
-        // };
-        // let (left_data, right_data) = &mut data.split_at_mut(self.data.len());
         let mut merge =
             slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, *MIN_MERGE_SIZE);
 
         merge.run(f);
 
         let data = fuse_slices(self.data, other.data);
-        // std::mem::swap(&mut self.data, &mut self.buffer);
 
         self.data = buffer;
         self.buffer = data;

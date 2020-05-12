@@ -16,7 +16,7 @@ lazy_static! {
 }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(24) + 2usize.pow(10))
+        .take(2usize.pow(20) - 10000)
         .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -72,15 +72,26 @@ where
     // println!("Result: {:?}", mergesort.pieces_len());
 
     assert!(
-        mergesort.pieces.len() <= 2,
+        mergesort.pieces_len().windows(2).all(|w| w[0] > w[1]),
         format!("{:?}", mergesort.pieces_len())
     );
-    if mergesort.pieces.len() > 1 {
-        let other =mergesort.pieces.pop().unwrap();
-        mergesort.pieces[0].merge(other, None);
-
+    // let's merge all the pieces from the back
+    while mergesort.pieces.len() >= 2 {
+        let mut other = mergesort.pieces.pop().unwrap();
+        let me = mergesort.pieces.last_mut().unwrap();
+        unsafe {
+            if me.data.as_ptr().add(me.data.len()) != other.data.as_ptr() {
+                // not neighbors, need to copy over
+                std::ptr::copy_nonoverlapping(
+                    other.data.as_ptr(),
+                    other.buffer.as_mut_ptr(),
+                    other.data.len(),
+                );
+                std::mem::swap(&mut other.data, &mut other.buffer);
+            }
+        }
+        mergesort.pieces.last_mut().unwrap().merge(other, None);
     }
-
     assert!(mergesort.data.windows(2).all(|w| w[0] <= w[1]));
     // we need to check where the output landed, it's either in the original data or in the
     // buffer. If it's in the buffer, we need to copy it over
@@ -154,49 +165,50 @@ where
                 if index != self.pieces.len() - 1 {
                     // that means while merging we got more pieces. We now need to merge
                     // from the inside
-                    self.merge_index(index);
+                    assert!(false);
+                    // self.merge_index(index);
                 }
             } else {
                 break; // nothing to do
             }
         }
     }
-    fn merge_index(&mut self, mut index: usize) {
-        assert!(false);
-        // merge neighbors of the sorted piece at index i
-        let mut change = true;
-        while change {
-            change = false;
-            let a = &self.pieces[index];
-            // let b = &self.pieces[index + 1];
-            if index < self.pieces.len() - 1
-                && a.len() == self.pieces[index + 1].len()
-                && a.offset % (a.len() * 2) == 0
-            {
-                // merge right neighbor
-                change = true;
-                let b = self.pieces.remove(index + 1);
-                let a = &mut self.pieces[index];
-                assert_eq!(a.offset + a.len(), b.offset);
-                rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
-            } else {
-                if index > 0
-                    && a.len() == self.pieces[index - 1].len()
-                    && a.offset % (a.len() * 2) != 0
-                {
-                    // merge left neighbor
-                    change = true;
-                    let b = self.pieces.remove(index);
-                    let a = &mut self.pieces[index - 1];
-                    // assert_eq!(a.offset % (a.len() * 2), 0);
-                    assert_eq!(a.offset + a.len(), b.offset);
-                    // assert_eq!(a.in_data, b.in_data);
-                    rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
-                    index -= 1;
-                }
-            }
-        }
-    }
+    // fn merge_index(&mut self, mut index: usize) {
+    //     assert!(false);
+    //     // merge neighbors of the sorted piece at index i
+    //     let mut change = true;
+    //     while change {
+    //         change = false;
+    //         let a = &self.pieces[index];
+    //         // let b = &self.pieces[index + 1];
+    //         if index < self.pieces.len() - 1
+    //             && a.len() == self.pieces[index + 1].len()
+    //             && a.offset % (a.len() * 2) == 0
+    //         {
+    //             // merge right neighbor
+    //             change = true;
+    //             let b = self.pieces.remove(index + 1);
+    //             let a = &mut self.pieces[index];
+    //             assert_eq!(a.offset + a.len(), b.offset);
+    //             rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
+    //         } else {
+    //             if index > 0
+    //                 && a.len() == self.pieces[index - 1].len()
+    //                 && a.offset % (a.len() * 2) != 0
+    //             {
+    //                 // merge left neighbor
+    //                 change = true;
+    //                 let b = self.pieces.remove(index);
+    //                 let a = &mut self.pieces[index - 1];
+    //                 // assert_eq!(a.offset % (a.len() * 2), 0);
+    //                 assert_eq!(a.offset + a.len(), b.offset);
+    //                 // assert_eq!(a.in_data, b.in_data);
+    //                 rayon::subgraph("merge_repair", a.len() + b.len(), || a.merge(b, None));
+    //                 index -= 1;
+    //             }
+    //         }
+    //     }
+    // }
 
     fn split(self: &mut Self, _steal_counter: Option<usize>) -> Self {
         // println!("Splitting");
@@ -230,6 +242,11 @@ where
         return other;
     }
     fn next(&self, i: usize) -> usize {
+        // find the next number that has only leading zeros in binary
+        // eg next(5) = next(0b101) = 0b110
+        // next(9) = next(0x1001) = 0x1100 = 12
+        // we need to have an amount of elements like this on the left to ensure that we can merge
+        // the result in the end
         let mut highest = i.next_power_of_two() / 2;
         // find first zero
         while highest != 0 && i | highest == i {
