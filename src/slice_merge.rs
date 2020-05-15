@@ -35,57 +35,49 @@ where
             };
         }
     }
-    pub fn _progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
-        // let now = std::time::Instant::now();
-        while self.work_left() != 0 {
-            let steal_count = steal::get_my_steal_count();
-            if self.work_left() < 32 * self.work_size || steal_count == 0 {
-                self.merge();
-            } else {
-                let f = f.take();
-                // if let Some(f) = f {
-                //     println!("Taking");
-                //     rayon::join(|| self.progressive_merge(None), || f.run());
-                // } else {
-                let mut other = self.split();
-                if steal_count > 2 {
-                    // divide in 4
-                    let mut self_other = self.split();
-                    let mut other_other = other.split();
-                    rayon::join(
-                        || {
-                            rayon::join(
-                                || {
-                                    rayon::join(
-                                        || {
-                                            steal::reset_my_steal_count();
-                                            self.progressive_merge(None)
-                                        },
-                                        || self_other.progressive_merge(None),
-                                    )
-                                },
-                                || other.progressive_merge(None),
-                            )
-                        },
-                        || other_other.progressive_merge(None),
-                    );
-                } else {
-                    rayon::join(
-                        || self.progressive_merge(f),
-                        || other.progressive_merge(None),
-                    );
-                }
-            }
-        }
-    }
-    pub fn progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
-        while self.work_left() > 0 {
-            if self.check() {
-                return;
-            }
-            self.merge();
-        }
-    }
+    // pub fn _progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
+    //     // let now = std::time::Instant::now();
+    //     while self.work_left() != 0 {
+    //         let steal_count = steal::get_my_steal_count();
+    //         if self.work_left() < 32 * self.work_size || steal_count == 0 {
+    //             self.merge();
+    //         } else {
+    //             let f = f.take();
+    //             // if let Some(f) = f {
+    //             //     println!("Taking");
+    //             //     rayon::join(|| self.progressive_merge(None), || f.run());
+    //             // } else {
+    //             let mut other = self.split();
+    //             if steal_count > 2 {
+    //                 // divide in 4
+    //                 let mut self_other = self.split();
+    //                 let mut other_other = other.split();
+    //                 rayon::join(
+    //                     || {
+    //                         rayon::join(
+    //                             || {
+    //                                 rayon::join(
+    //                                     || {
+    //                                         steal::reset_my_steal_count();
+    //                                         self.progressive_merge(None)
+    //                                     },
+    //                                     || self_other.progressive_merge(None),
+    //                                 )
+    //                             },
+    //                             || other.progressive_merge(None),
+    //                         )
+    //                     },
+    //                     || other_other.progressive_merge(None),
+    //                 );
+    //             } else {
+    //                 rayon::join(
+    //                     || self.progressive_merge(f),
+    //                     || other.progressive_merge(None),
+    //                 );
+    //             }
+    //         }
+    //     }
+    // }
 
     pub fn work_left(&self) -> usize {
         return diff(self.output, self.output_end);
@@ -145,7 +137,7 @@ where
             let mut right: *const T = self.right;
             let mut output: *mut T = self.output;
             while left < left_work_end && right < right_work_end {
-                let to_copy = if *left < *right {
+                let to_copy = if *left <= *right {
                     get_and_increment(&mut left)
                 } else {
                     get_and_increment(&mut right)
@@ -181,10 +173,21 @@ where
 
 impl<T> Task for SliceMerge<T>
 where
-    T: Copy + Ord,
+    T: Copy + Ord + Sync + Send,
+    // S: Sync + Send,
 {
-    fn run(&mut self, parent: Option<&mut dyn Task>) -> () {
-        self.progressive_merge(parent);
+    // fn run(&mut self, parent: Option<&mut dyn Task<std::vec::Vec<T>, std::vec::Vec<T>>>) -> () {
+    fn step(&mut self ) {
+        // while self.work_left() > 0 {
+            // if self.check(parent) {
+                // return;
+            // }
+            self.merge();
+        // }
+    }
+    fn is_finished(&self) -> bool {
+        self.work_left() == 0 
+
     }
 
     fn split(&mut self) -> Self {
@@ -194,9 +197,9 @@ where
         return self.work_left() > self.work_size * 32;
     }
 
-    fn fuse(&mut self, _other: Self) -> () {
-        // Nothing to do here?
-    }
+    // fn fuse(&mut self, _other: Self) -> () {
+    //     // Nothing to do here?
+    // }
 }
 
 // difference between two pointer (it's in  std::ptr but only on nightly)

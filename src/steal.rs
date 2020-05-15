@@ -42,13 +42,17 @@ pub fn steal(backoffs: usize, victim: usize) -> Option<()> {
     None
 }
 pub fn get_my_steal_count() -> usize {
-    let thread_index = rayon::current_thread_index().unwrap();
-    let steal_counter = V[thread_index].load(Ordering::Relaxed);
-    let steal_counter = steal_counter.count_ones() as usize;
-    let steal_counter = std::cmp::min(steal_counter, *NUM_THREADS - 1);
-    steal_counter
+    if let Some(thread_index) = rayon::current_thread_index() {
+        let steal_counter = V[thread_index].load(Ordering::Relaxed);
+        let steal_counter = steal_counter.count_ones() as usize;
+        let steal_counter = std::cmp::min(steal_counter, *NUM_THREADS - 1);
+        steal_counter
+    } else {
+        0
+    }
 }
 pub fn reset_my_steal_count() {
-    let thread_index = rayon::current_thread_index().unwrap();
-    V[thread_index].store(0, Ordering::Relaxed);
+    if let Some(thread_index) = rayon::current_thread_index() {
+        V[thread_index].store(0, Ordering::Relaxed);
+    }
 }

@@ -40,7 +40,8 @@ where
         self.data.windows(2).all(|w| w[0] <= w[1])
     }
 
-    pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut dyn Task>) {
+    pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut impl Task>) {
+        // S: Sync + Send{
         // assert_eq!(self.in_data, other.in_data);
         // assert_eq!(self.data.len(), other.data.len());
         // if self.data.len() != other.data.len() {
@@ -49,13 +50,12 @@ where
         let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut merge =
             slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, *MIN_MERGE_SIZE);
-
-        merge.run(f);
-
         let data = fuse_slices(self.data, other.data);
 
         self.data = buffer;
         self.buffer = data;
+
+        merge.run(f);
     }
 }
 
