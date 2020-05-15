@@ -1,5 +1,4 @@
 use crate::merge::Task;
-use crate::steal;
 use std::mem;
 use std::ptr;
 
@@ -35,100 +34,16 @@ where
             };
         }
     }
-    // pub fn _progressive_merge(&mut self, mut f: Option<&mut dyn Task>) {
-    //     // let now = std::time::Instant::now();
-    //     while self.work_left() != 0 {
-    //         let steal_count = steal::get_my_steal_count();
-    //         if self.work_left() < 32 * self.work_size || steal_count == 0 {
-    //             self.merge();
-    //         } else {
-    //             let f = f.take();
-    //             // if let Some(f) = f {
-    //             //     println!("Taking");
-    //             //     rayon::join(|| self.progressive_merge(None), || f.run());
-    //             // } else {
-    //             let mut other = self.split();
-    //             if steal_count > 2 {
-    //                 // divide in 4
-    //                 let mut self_other = self.split();
-    //                 let mut other_other = other.split();
-    //                 rayon::join(
-    //                     || {
-    //                         rayon::join(
-    //                             || {
-    //                                 rayon::join(
-    //                                     || {
-    //                                         steal::reset_my_steal_count();
-    //                                         self.progressive_merge(None)
-    //                                     },
-    //                                     || self_other.progressive_merge(None),
-    //                                 )
-    //                             },
-    //                             || other.progressive_merge(None),
-    //                         )
-    //                     },
-    //                     || other_other.progressive_merge(None),
-    //                 );
-    //             } else {
-    //                 rayon::join(
-    //                     || self.progressive_merge(f),
-    //                     || other.progressive_merge(None),
-    //                 );
-    //             }
-    //         }
-    //     }
-    // }
-
     pub fn work_left(&self) -> usize {
-        return diff(self.output, self.output_end);
+        diff(self.output, self.output_end)
     }
-    pub fn split(&mut self) -> SliceMerge<T> {
-        use std::slice::{from_raw_parts, from_raw_parts_mut};
-        unsafe {
-            // get back the slices
-            let left = from_raw_parts(self.left, diff(self.left, self.left_end));
-            let right = from_raw_parts(self.right, diff(self.right, self.right_end));
-            let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
-            // split on side at half (we might want to split the bigger side (?)
-            let (left_left, left_right) = left.split_at(left.len() / 2);
+}
 
-            // split the right side at the same element than the left side
-            let i = SliceMerge::split_for_merge(right, &*left_right.as_ptr());
-            let (right_left, right_right) = right.split_at(i);
-            let (output_left, output_right) =
-                output.split_at_mut(right_left.len() + left_left.len());
-            // create another merging task will all right side slices.
-            let other = SliceMerge {
-                left: left_right.as_ptr(),
-                left_end: left_right.as_ptr().add(left_right.len()),
-                right: right_right.as_ptr(),
-                right_end: right_right.as_ptr().add(right_right.len()),
-                output: output_right.as_mut_ptr(),
-                output_end: output_right.as_ptr().add(output_right.len()),
-                work_size: self.work_size,
-            };
-            // just merge the left-side slices here
-            self.left_end = self.left.add(left_left.len());
-            self.right_end = self.right.add(right_left.len());
-            self.output_end = self.output.add(output_left.len());
-            return other;
-        }
-    }
-    fn split_for_merge(left: &[T], elem: &T) -> usize {
-        let mut a = 0;
-        let mut b = left.len();
-        while a < b {
-            let m = a + (b - a) / 2;
-            if elem < &left[m] {
-                b = m;
-            } else {
-                a = m + 1;
-            }
-        }
-        a
-    }
-
-    pub fn merge(&mut self) {
+impl<T> Task for SliceMerge<T>
+where
+    T: Copy + Ord + Sync + Send,
+{
+    fn step(&mut self) {
         assert!(self.output as *const T != self.output_end);
         unsafe {
             let left_work_end = std::cmp::min(self.left_end, self.left.add(self.work_size));
@@ -169,41 +84,67 @@ where
             }
         }
     }
-}
-
-impl<T> Task for SliceMerge<T>
-where
-    T: Copy + Ord + Sync + Send,
-    // S: Sync + Send,
-{
-    // fn run(&mut self, parent: Option<&mut dyn Task<std::vec::Vec<T>, std::vec::Vec<T>>>) -> () {
-    fn step(&mut self ) {
-        // while self.work_left() > 0 {
-            // if self.check(parent) {
-                // return;
-            // }
-            self.merge();
-        // }
-    }
     fn is_finished(&self) -> bool {
-        self.work_left() == 0 
-
+        return diff(self.output, self.output_end) == 0;
     }
 
     fn split(&mut self) -> Self {
-        SliceMerge::split(self)
+        use std::slice::{from_raw_parts, from_raw_parts_mut};
+        unsafe {
+            // get back the slices
+            let left = from_raw_parts(self.left, diff(self.left, self.left_end));
+            let right = from_raw_parts(self.right, diff(self.right, self.right_end));
+            let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
+            // split on side at half (we might want to split the bigger side (?)
+            let (left_left, left_right) = left.split_at(left.len() / 2);
+
+            // split the right side at the same element than the left side
+            let i = split_for_merge(right, &*left_right.as_ptr());
+            let (right_left, right_right) = right.split_at(i);
+            let (output_left, output_right) =
+                output.split_at_mut(right_left.len() + left_left.len());
+            // create another merging task will all right side slices.
+            let other = SliceMerge {
+                left: left_right.as_ptr(),
+                left_end: left_right.as_ptr().add(left_right.len()),
+                right: right_right.as_ptr(),
+                right_end: right_right.as_ptr().add(right_right.len()),
+                output: output_right.as_mut_ptr(),
+                output_end: output_right.as_ptr().add(output_right.len()),
+                work_size: self.work_size,
+            };
+            // just merge the left-side slices here
+            self.left_end = self.left.add(left_left.len());
+            self.right_end = self.right.add(right_left.len());
+            self.output_end = self.output.add(output_left.len());
+            return other;
+        }
     }
     fn can_split(&self) -> bool {
         return self.work_left() > self.work_size * 32;
     }
 
-    // fn fuse(&mut self, _other: Self) -> () {
+    // fn fuse(&mut self, _other: Self) {
     //     // Nothing to do here?
     // }
 }
 
 // difference between two pointer (it's in  std::ptr but only on nightly)
 fn diff<T>(left: *const T, right: *const T) -> usize {
-    assert!(right as usize >= left as usize);
+    // assert!(right as usize >= left as usize);
     (right as usize - left as usize) / mem::size_of::<T>()
+}
+fn split_for_merge<T>(left: &[T], elem: &T) -> usize 
+where T: Ord{
+    let mut a = 0;
+    let mut b = left.len();
+    while a < b {
+        let m = a + (b - a) / 2;
+        if elem < &left[m] {
+            b = m;
+        } else {
+            a = m + 1;
+        }
+    }
+    a
 }

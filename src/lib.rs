@@ -17,7 +17,7 @@ lazy_static! {
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(18))
+        .take(2usize.pow(22))
         // .map(|x: usize| x % 1_000_000)
         .collect();
 
@@ -87,7 +87,7 @@ where
             .pieces
             .last_mut()
             .unwrap()
-            .merge(other, None as task::NoTask);
+            .merge(other, task::NOTHING);
     }
     assert!(mergesort.data.windows(2).all(|w| w[0] <= w[1]));
     // we need to check where the output landed, it's either in the original data or in the
@@ -143,7 +143,6 @@ where
             let len = self.pieces.len();
             let a = &self.pieces[len - 2];
             let b = &self.pieces[len - 1];
-            // assert!( a.len() >= b.len(), format!("{:?}", self.pieces_len()));
             if a.len() == b.len() {
                 // we can merge, remove last item
 
@@ -152,11 +151,11 @@ where
                 // we want to be able to work on this element while also working on the merge at
                 // the same time. There should be a better that disabling the borrow checker here,
                 // but it works for now
-                let a: &mut MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
+                let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
                 assert_eq!(a.offset + a.len(), b.offset);
 
                 rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
-            // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, task::NOTHING));
+                // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, task::NOTHING));
 
             } else {
                 break; // nothing to do
@@ -191,13 +190,14 @@ where
     T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
     fn step(&mut self) {
+        // this seems to be required after a split sometimes
+        self.merge();
         
         let elem_left = self.data.len();
         if elem_left == 0 {
             return;
         };
         // Do some work: Split off and sort piece
-        // assert!(elem_left >= *MIN_BLOCK_SIZE);
         let work_size = std::cmp::min(*MIN_BLOCK_SIZE, elem_left);
         let piece = cut_off_left(&mut self.data, work_size);
         rayon::subgraph("actual sort", *MIN_BLOCK_SIZE, || piece.sort());
@@ -222,12 +222,7 @@ where
         let already_done = self.pieces_len().iter().sum::<usize>();
         let total = already_done + elem_left;
         let split_index = self.next(already_done.max(total.next_power_of_two() / 2));
-        // println!(
-        //     "Done: {}, total: {}, splitting at {}",
-        //     already_done, total, split_index
-        // );
-        // let split_index = elem_left.next_power_of_two() / 2;
-
+     
         // split off a part for the other task
         let right_to = cut_off_right(&mut self.to, split_index - already_done);
         let right_data = cut_off_right(&mut self.data, split_index - already_done);

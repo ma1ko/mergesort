@@ -11,6 +11,8 @@ pub fn get_thread_pool() -> rayon_logs::ThreadPool {
 pub fn get_thread_pool() -> rayon::ThreadPool {
     rayon::ThreadPoolBuilder::new()
         .steal_callback(|x| steal::steal(8, x))
+        // .num_threads(1)
+
         .build()
         .unwrap()
 }

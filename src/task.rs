@@ -1,58 +1,7 @@
 use crate::steal;
 
-// pub trait Task<T>: Send + Sync {
-//     // run self *and* me, or return false if you can't
-//     fn run(&mut self, parent: Option<&mut dyn Task>) -> ();
-//     fn split(&mut self) -> Box<dyn Task>;
-//     fn can_split(&self) -> bool;
-//     fn split_run(&mut self, steal_counter: usize)
-//     {
-//         let mut other = self.split();
-
-//         // if steal_counter < 2 {
-//         rayon::join(
-//             || {
-//                 steal::reset_my_steal_count();
-//                 self.run(None)
-//             },
-//             || other.run(None),
-//         );
-//         // } else {
-//         //     rayon::join(
-//         //         || {
-//         //             steal::reset_my_steal_count();
-//         //             self.split_run(steal_counter / 2)
-//         //         },
-//         //         || other.split_run(steal_counter / 2),
-//         //     );
-//         // }
-
-//         self.fuse(other);
-//         // self.run(None); // Other has one element, we can try to merge that to self
-//     }
-//     fn check(&mut self) -> bool
-//     {
-//         let steal_counter = steal::get_my_steal_count();
-//         if steal_counter == 0 {
-//             return false;
-//             // return Some(self);
-//         }
-//         if !self.can_split() {
-//             return false;
-//             // return Some(self);
-//         }
-//         self.split_run(steal_counter);
-//         true
-//     }
-//     fn get_result(&self) -> T;
-//     fn fuse(&mut self, _other: T) -> ()
-//     {
-//         assert!(false);
-//     }
-// }
-//
-// if you can't use None because of typing errors, use Option<Dummy> = None
-#[derive(Copy, Clone)]
+// if you can't use None because of typing errors, use Nothing
+// #[derive(Copy, Clone)]
 pub struct Dummy;
 pub const NOTHING: Option<&mut Dummy> = None;
 
@@ -96,7 +45,10 @@ pub trait Task: Send + Sync + Sized {
             if f.can_split() {
                 let mut other = f.split();
                 rayon::join(
-                    || other.run_(),
+                    || {
+                        steal::reset_my_steal_count();
+                        other.run_()
+                    },
                     || {
                         self.run_();
                         f.run_()
@@ -108,7 +60,7 @@ pub trait Task: Send + Sync + Sized {
         }
 
         let mut other: Self = self.split();
-        // if steal_counter < 2 {
+        if steal_counter < 2 {
             rayon::join(
                 || {
                     steal::reset_my_steal_count();
@@ -117,15 +69,13 @@ pub trait Task: Send + Sync + Sized {
                 || other.run_(),
             );
             self.fuse(other);
-        // } else {
-        //     rayon::join(
-        //         || self.split_run(steal_counter / 2, NOTHING),
-        //         || other.split_run(steal_counter / 2, NOTHING),
-        //     );
-        // }
-
-        // self.fuse(other);
-        // self.run(None); // Other has one element, we can try to merge that to self
+        } else {
+            rayon::join(
+                || self.split_run(steal_counter / 2, NOTHING),
+                || other.split_run(steal_counter / 2, NOTHING),
+            );
+            self.fuse(other);
+        }
     }
     // fn check(&mut self, f: Option<impl Task>) -> bool {}
     fn can_split(&self) -> bool;

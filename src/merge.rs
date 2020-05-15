@@ -41,13 +41,7 @@ where
     }
 
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut impl Task>) {
-        // S: Sync + Send{
-        // assert_eq!(self.in_data, other.in_data);
-        // assert_eq!(self.data.len(), other.data.len());
-        // if self.data.len() != other.data.len() {
-        //     println!("Uneven merge: {} and {}", self.data.len(), other.data.len());
-        // }
-        let mut buffer = fuse_slices(self.buffer, other.buffer);
+               let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut merge =
             slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, *MIN_MERGE_SIZE);
         let data = fuse_slices(self.data, other.data);
@@ -67,42 +61,3 @@ pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T])
     }
 }
 
-#[derive(Debug, Default)]
-pub struct MergeProgress {
-    left: usize,
-    right: usize,
-    output: usize,
-    work_size: usize,
-}
-
-// Merge two slices, tracking progress. We do work_size items, then return
-fn _unsafe_manual_merge2<T>(progress: &mut MergeProgress, left: &[T], right: &[T], output: &mut [T])
-where
-    T: Ord + Copy,
-{
-    let mut left_index = progress.left;
-    let mut right_index = progress.right;
-    let (_, r) = output.split_at_mut(progress.output);
-    let (l, _) = r.split_at_mut(progress.work_size);
-    let output = l;
-    for o in output {
-        unsafe {
-            if left_index >= left.len() {
-                *o = *right.get_unchecked(right_index);
-                right_index += 1;
-            } else if right_index >= right.len() {
-                *o = *left.get_unchecked(left_index);
-                left_index += 1;
-            } else if left.get_unchecked(left_index) <= right.get_unchecked(right_index) {
-                *o = *left.get_unchecked(left_index);
-                left_index += 1;
-            } else {
-                *o = *right.get_unchecked(right_index);
-                right_index += 1;
-            };
-        }
-    }
-    progress.left = left_index;
-    progress.right = right_index;
-    progress.output = left_index + right_index;
-}
