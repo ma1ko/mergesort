@@ -8,12 +8,12 @@ pub mod steal;
 pub mod task;
 
 use crate::task::Task;
-lazy_static! {
-    static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
-        .map(|x| x.parse::<usize>().unwrap())
-        .unwrap_or(2usize.pow(10));
-    static ref MIN_SPLIT_SIZE: usize = 32 * *MIN_BLOCK_SIZE;
-}
+// lazy_static! {
+//     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
+//         .map(|x| x.parse::<usize>().unwrap())
+//         .unwrap_or(2usize.pow(10));
+//     static ref MIN_SPLIT_SIZE: usize = 32 * *MIN_BLOCK_SIZE;
+// }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
     let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
@@ -58,7 +58,7 @@ where
         data,
         to: &mut tmp_slice,
         pieces: Vec::new(),
-        offset: 0,
+        blocksize: 256,
     };
     mergesort.run_();
     // There might be many ordered non-sorted blocks left. That happens when we sort an input
@@ -124,7 +124,7 @@ where
     data: &'a mut [T],
     to: &'a mut [T],
     pieces: Vec<merge::MergeResult<'a, T>>,
-    offset: usize,
+    blocksize: usize,
 }
 impl<'a, T> Mergesort<'a, T>
 where
@@ -152,7 +152,6 @@ where
                 // the same time. There should be a better that disabling the borrow checker here,
                 // but it works for now
                 let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
-                assert_eq!(a.offset + a.len(), b.offset);
 
                 rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
                 // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, task::NOTHING));
@@ -198,12 +197,11 @@ where
             return;
         };
         // Do some work: Split off and sort piece
-        let work_size = std::cmp::min(*MIN_BLOCK_SIZE, elem_left);
+        let work_size = std::cmp::min(self.blocksize, elem_left);
         let piece = cut_off_left(&mut self.data, work_size);
-        rayon::subgraph("actual sort", *MIN_BLOCK_SIZE, || piece.sort());
+        rayon::subgraph("actual sort", self.blocksize, || piece.sort());
         let buffer = cut_off_left(&mut self.to, work_size);
-        let merge = merge::MergeResult::new(piece, buffer, self.offset);
-        self.offset += *MIN_BLOCK_SIZE;
+        let merge = merge::MergeResult::new(piece, buffer);
         self.pieces.push(merge);
         // try merging pieces
         self.merge();
@@ -232,12 +230,12 @@ where
             pieces: Vec::new(),
             data: right_data,
             to: right_to,
-            offset: self.offset + split_index - already_done,
+            blocksize: self.blocksize
         };
         return other;
     }
     fn can_split(&self) -> bool {
-        return self.data.len() > *MIN_SPLIT_SIZE;
+        return self.data.len() > self.blocksize * 32;
     }
     fn fuse(&mut self, mut other: Self) {
         self.merge();

@@ -2,14 +2,8 @@ use crate::slice_merge;
 pub use crate::task::Task;
 // use std::sync::atomic::AtomicUsize;
 
-lazy_static! {
-    static ref MIN_MERGE_SIZE: usize = std::env::var("MERGESIZE")
-        .map(|x| x.parse::<usize>().unwrap())
-        .unwrap_or(1024);
-    static ref SPLIT_THRESHOLD: usize = 32 * *MIN_MERGE_SIZE;
-    // pub static ref MERGE_SPEEDS: Vec<(AtomicUsize, AtomicUsize)> =
-        // (0..num_cpus::get()).map(|_| Default::default()).collect();
-}
+const BLOCKSIZE : usize = 1024;
+
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>
@@ -18,19 +12,19 @@ where
 {
     pub data: &'a mut [T], // that's where it starts and should be after it's merged
     pub buffer: &'a mut [T], // that's where it temporarily might be
-    pub offset: usize,     // index in total
+    pub blocksize: usize,     // index in total
 }
 
 impl<'a, T> MergeResult<'a, T>
 where
     T: Ord + Sync + Send + Copy + std::fmt::Debug,
 {
-    pub fn new(data: &'a mut [T], buffer: &'a mut [T], offset: usize) -> MergeResult<'a, T> {
+    pub fn new(data: &'a mut [T], buffer: &'a mut [T]) -> MergeResult<'a, T> {
         assert_eq!(data.len(), buffer.len());
         MergeResult {
             data,
             buffer,
-            offset,
+            blocksize : BLOCKSIZE
         }
     }
     pub fn len(self: &Self) -> usize {
@@ -43,7 +37,7 @@ where
     pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut impl Task>) {
                let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut merge =
-            slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, *MIN_MERGE_SIZE);
+            slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, self.blocksize);
         let data = fuse_slices(self.data, other.data);
 
         self.data = buffer;
