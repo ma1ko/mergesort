@@ -95,12 +95,13 @@ where
             let left = from_raw_parts(self.left, diff(self.left, self.left_end));
             let right = from_raw_parts(self.right, diff(self.right, self.right_end));
             let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
+
             // split on side at half (we might want to split the bigger side (?)
-            let (left_left, left_right) = left.split_at(left.len() / 2);
+            let (left_index, right_index) = split_for_merge(left,right, &|a,b| a < b );
+            let (left_left, left_right) = left.split_at(left_index);
 
             // split the right side at the same element than the left side
-            let i = split_for_merge(right, &*left_right.as_ptr());
-            let (right_left, right_right) = right.split_at(i);
+            let (right_left, right_right) = right.split_at(right_index);
             let (output_left, output_right) =
                 output.split_at_mut(right_left.len() + left_left.len());
             // create another merging task will all right side slices.
@@ -121,7 +122,7 @@ where
         }
     }
     fn can_split(&self) -> bool {
-        return self.work_left() > self.work_size * 32;
+        return self.work_left() > self.work_size * 32
     }
 
     // fn fuse(&mut self, _other: Self) {
@@ -134,17 +135,50 @@ fn diff<T>(left: *const T, right: *const T) -> usize {
     // assert!(right as usize >= left as usize);
     (right as usize - left as usize) / mem::size_of::<T>()
 }
-fn split_for_merge<T>(left: &[T], elem: &T) -> usize 
-where T: Ord{
-    let mut a = 0;
-    let mut b = left.len();
-    while a < b {
-        let m = a + (b - a) / 2;
-        if elem < &left[m] {
-            b = m;
-        } else {
-            a = m + 1;
+
+// copied from rayon: https://github.com/rayon-rs/rayon/blob/master/src/slice/mergesort.rs
+/// Splits two sorted slices so that they can be merged in parallel.
+///
+/// Returns two indices `(a, b)` so that slices `left[..a]` and `right[..b]` come before
+/// `left[a..]` and `right[b..]`.
+fn split_for_merge<T, F>(left: &[T], right: &[T], is_less: &F) -> (usize, usize)
+where
+    F: Fn(&T, &T) -> bool,
+{
+    let left_len = left.len();
+    let right_len = right.len();
+
+    if left_len >= right_len {
+        let left_mid = left_len / 2;
+
+        // Find the first element in `right` that is greater than or equal to `left[left_mid]`.
+        let mut a = 0;
+        let mut b = right_len;
+        while a < b {
+            let m = a + (b - a) / 2;
+            if is_less(&right[m], &left[left_mid]) {
+                a = m + 1;
+            } else {
+                b = m;
+            }
         }
+
+        (left_mid, a)
+    } else {
+        let right_mid = right_len / 2;
+
+        // Find the first element in `left` that is greater than `right[right_mid]`.
+        let mut a = 0;
+        let mut b = left_len;
+        while a < b {
+            let m = a + (b - a) / 2;
+            if is_less(&right[right_mid], &left[m]) {
+                b = m;
+            } else {
+                a = m + 1;
+            }
+        }
+
+        (a, right_mid)
     }
-    a
 }

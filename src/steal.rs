@@ -1,8 +1,8 @@
-use crate::crossbeam::{Backoff, CachePadded};
+use crossbeam_utils::{Backoff, CachePadded};
 use num_cpus;
 use std::sync::atomic::{AtomicUsize, Ordering};
 lazy_static! {
-    static ref NUM_THREADS: usize = num_cpus::get();
+    pub static ref NUM_THREADS: usize = num_cpus::get();
     static ref V: Vec<CachePadded<AtomicUsize>> = (0..*NUM_THREADS)
         .map(|_| CachePadded::new(AtomicUsize::new(0)))
         .collect();

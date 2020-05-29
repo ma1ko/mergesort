@@ -2,17 +2,9 @@ use criterion::BenchmarkGroup;
 use criterion::*;
 use mergesort::{mergesort, steal};
 use rayon::prelude::*;
-#[macro_use]
-extern crate lazy_static;
 extern crate num;
 extern crate rand;
-lazy_static! {
-    static ref V: Vec<u32> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20) - 10000)
-        .map(|x: u32| x % 1_000_000)
-        .collect();
-    static ref CHECKSUM: u32 = V.iter().sum::<u32>();
-}
+
 
 type Group<'a> = BenchmarkGroup<'a, criterion::measurement::WallTime>;
 struct Tester<'a, T: 'a> {
@@ -214,19 +206,10 @@ impl Single {
 }
 
 fn bench(c: &mut Criterion) {
-    println!("{}", V[0]); // to init lazy_static
     let mut group = c.benchmark_group("MergeSorting");
     group.warm_up_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
-    group.nresamples(10);
-    /*
-    let mut v: Vec<u32> = (0..1 << 20).into_iter().collect();
-    let mut rng = rand::thread_rng();
-    use rand::seq::SliceRandom;
-    v.shuffle(&mut rng);
-    */
-
-    let v_20: Vec<u32> = std::iter::repeat_with(rand::random)
+    let v: Vec<u32> = std::iter::repeat_with(rand::random)
         .take(2usize.pow(20))
         // .map(|x: u32| x % 1_000_000)
         .collect();
@@ -243,18 +226,18 @@ fn bench(c: &mut Criterion) {
 
     let mut test: Vec<Box<dyn Test<u32>>> = vec![];
     for i in &cpus {
-        for s in vec![6, 8] {
-            let x: Box<dyn Test<u32>> = Box::new(Adaptive::new(*i, s));
+        for s in vec![6,8] {
+            let x= Box::new(Adaptive::new(*i, s));
             test.push(x);
         }
-        let x: Box<dyn Test<u32>> = Box::new(RayonAdaptive::new(*i));
+        let x  = Box::new(RayonAdaptive::new(*i));
         test.push(x);
-        let x: Box<dyn Test<u32>> = Box::new(Rayon::new(*i));
+        let x  = Box::new(Rayon::new(*i));
         test.push(x);
     }
-    let x: Box<dyn Test<u32>> = Box::new(Single::new(1));
+    let x  = Box::new(Single::new(1));
     test.push(x);
-    let mut t = Tester::new(v_20, test, group);
+    let mut t = Tester::new(v, test, group);
     // let mut t = Tester::new(v_21, test, group);
     t.run();
 

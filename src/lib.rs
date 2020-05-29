@@ -1,11 +1,11 @@
 #[macro_use]
 extern crate lazy_static;
-use crossbeam_utils as crossbeam;
 pub mod merge;
 pub mod rayon;
 mod slice_merge;
 pub mod steal;
 pub mod task;
+use rand::prelude::*;
 
 use crate::task::Task;
 // lazy_static! {
@@ -16,12 +16,19 @@ use crate::task::Task;
 // }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
-    let mut v: Vec<usize> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(22))
+    let v: Vec<usize> = std::iter::repeat_with(rand::random)
+        // .take(2usize.pow(22))
+        .take(16000000)
         // .map(|x: usize| x % 1_000_000)
         .collect();
+fn random_vec(size: usize) -> Vec<u64> {
+    let mut v: Vec<u64> = (0..(size as u64)).collect();
+    v.shuffle(&mut thread_rng());
+    v
+}
+    let mut v = random_vec(16000000);
 
-    let checksum: usize = v.iter().sum();
+    let checksum: u64 = v.iter().cloned().sum();
     println!("Finished generating");
 
     let pool = rayon::get_default_thread_pool();
@@ -35,13 +42,13 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(not(feature = "logs"))]
     let _ = pool.install(|| mergesort(&mut v));
-    assert_eq!(checksum, v.iter().sum::<usize>(), "failed merging");
+    assert_eq!(checksum, v.iter().sum::<u64>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
     println!("Success!");
     Ok(())
 }
 
-#[test]
+// #[test]
 pub fn test() -> Result<(), Box<dyn std::error::Error>> {
     main()
 }
@@ -111,6 +118,13 @@ pub fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
     left
 }
 pub fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
+    let mid = if mid <= s.len() {
+        mid
+    } else {
+        println!("FAIL mid: {}, len: {}", mid, s.len());
+        assert!(false);
+        s.len() - 1
+    };
     let tmp: &'a mut [T] = ::std::mem::replace(&mut *s, &mut []);
     let (left, right) = tmp.split_at_mut(mid);
     *s = left;
@@ -229,6 +243,7 @@ where
             to: right_to,
             blocksize: self.blocksize,
         };
+        // println!("Split {} to {}", self.data.len(), other.data.len());
         return other;
     }
     fn can_split(&self) -> bool {
