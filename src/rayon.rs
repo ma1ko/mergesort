@@ -1,21 +1,37 @@
 use crate::steal;
 
 #[cfg(feature = "logs")]
-pub fn get_thread_pool() -> rayon_logs::ThreadPool {
+pub fn get_default_thread_pool() -> rayon_logs::ThreadPool {
     rayon_logs::ThreadPoolBuilder::new()
         .steal_callback(|x| steal::steal(8, x))
         .build()
         .unwrap()
 }
 #[cfg(not(feature = "logs"))]
-pub fn get_thread_pool() -> rayon::ThreadPool {
+pub fn get_default_thread_pool() -> rayon::ThreadPool {
     rayon::ThreadPoolBuilder::new()
         .steal_callback(|x| steal::steal(8, x))
-        // .num_threads(1)
-
         .build()
         .unwrap()
 }
+#[cfg(feature = "logs")]
+pub fn get_thread_pool(num_threads: usize, steal_callback: usize) -> rayon_logs::ThreadPool {
+    rayon_logs::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .steal_callback(move |x| steal::steal(steal_callback, x))
+        .build()
+        .unwrap()
+}
+#[cfg(not(feature = "logs"))]
+pub fn get_thread_pool(num_threads: usize, steal_callback: usize) -> rayon::ThreadPool {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .steal_callback(move |x| steal::steal(steal_callback, x))
+        .build()
+        .unwrap()
+}
+
+
 
 // quick abstraction that allow to switch easily between rayon and rayon_logs
 pub fn join<A, B, RA, RB>(oper_a: A, oper_b: B) -> (RA, RB)

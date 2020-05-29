@@ -24,7 +24,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let checksum: usize = v.iter().sum();
     println!("Finished generating");
 
-    let pool = rayon::get_thread_pool();
+    let pool = rayon::get_default_thread_pool();
     #[cfg(feature = "logs")]
     {
         let (_, log) = pool.logging_install(|| mergesort(&mut v));
@@ -104,13 +104,13 @@ where
     }
 }
 // from https://stackoverflow.com/questions/42162151/rust-error-e0495-using-split-at-mut-in-a-closure
-fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
+pub fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
     let tmp: &'a mut [T] = ::std::mem::replace(&mut *s, &mut []);
     let (left, right) = tmp.split_at_mut(mid);
     *s = right;
     left
 }
-fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
+pub fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
     let tmp: &'a mut [T] = ::std::mem::replace(&mut *s, &mut []);
     let (left, right) = tmp.split_at_mut(mid);
     *s = left;
@@ -154,16 +154,14 @@ where
                 let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
 
                 rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
-                // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, task::NOTHING));
-
+            // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, task::NOTHING));
             } else {
                 break; // nothing to do
             }
         }
     }
 
-
-       fn next(&self, i: usize) -> usize {
+    fn next(&self, i: usize) -> usize {
         // find the next number that has only leading zeros in binary
         // eg next(5) = next(0b101) = 0b110
         // next(9) = next(0x1001) = 0x1100 = 12
@@ -181,7 +179,6 @@ where
             result
         }
     }
-
 }
 use std::vec::Vec;
 impl<'a, T> Task for Mergesort<'a, T>
@@ -191,7 +188,7 @@ where
     fn step(&mut self) {
         // this seems to be required after a split sometimes
         self.merge();
-        
+
         let elem_left = self.data.len();
         if elem_left == 0 {
             return;
@@ -220,7 +217,7 @@ where
         let already_done = self.pieces_len().iter().sum::<usize>();
         let total = already_done + elem_left;
         let split_index = self.next(already_done.max(total.next_power_of_two() / 2));
-     
+
         // split off a part for the other task
         let right_to = cut_off_right(&mut self.to, split_index - already_done);
         let right_data = cut_off_right(&mut self.data, split_index - already_done);
@@ -230,7 +227,7 @@ where
             pieces: Vec::new(),
             data: right_data,
             to: right_to,
-            blocksize: self.blocksize
+            blocksize: self.blocksize,
         };
         return other;
     }
