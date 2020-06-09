@@ -16,6 +16,7 @@ rand = "*"
 itertools = "*"
 num_cpus = "*"
 num = "*"
+adaptive_algorithms = {git="https://github.com/ma1ko/adaptive_algorithms"}
 
 [dev-dependencies]
 criterion = {git = "https://github.com/ma1ko/criterion.rs"}

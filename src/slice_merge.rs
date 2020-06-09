@@ -1,6 +1,6 @@
-use crate::merge::Task;
 use std::mem;
 use std::ptr;
+use adaptive_algorithms::Task;
 
 pub struct SliceMerge<T>
 where
@@ -88,7 +88,8 @@ where
         return diff(self.output, self.output_end) == 0;
     }
 
-    fn split(&mut self) -> Self {
+    fn split(&mut self, mut runner: impl FnMut(&mut Self, &mut Self)) {
+        
         use std::slice::{from_raw_parts, from_raw_parts_mut};
         unsafe {
             // get back the slices
@@ -105,7 +106,7 @@ where
             let (output_left, output_right) =
                 output.split_at_mut(right_left.len() + left_left.len());
             // create another merging task will all right side slices.
-            let other = SliceMerge {
+            let mut other = SliceMerge {
                 left: left_right.as_ptr(),
                 left_end: left_right.as_ptr().add(left_right.len()),
                 right: right_right.as_ptr(),
@@ -118,11 +119,14 @@ where
             self.left_end = self.left.add(left_left.len());
             self.right_end = self.right.add(right_left.len());
             self.output_end = self.output.add(output_left.len());
-            return other;
+            runner(self, &mut other);
         }
     }
     fn can_split(&self) -> bool {
         return self.work_left() > self.work_size * 32
+    }
+    fn fuse(&mut self, _other: &mut Self) {
+        // Nothing to do here actually
     }
 
     // fn fuse(&mut self, _other: Self) {

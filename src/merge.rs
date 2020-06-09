@@ -1,5 +1,5 @@
 use crate::slice_merge;
-pub use crate::task::Task;
+pub use adaptive_algorithms::Task;
 // use std::sync::atomic::AtomicUsize;
 
 const BLOCKSIZE : usize = 1024;
@@ -8,7 +8,7 @@ const BLOCKSIZE : usize = 1024;
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>
 where
-    T: Ord + Sync + Send + Copy + std::fmt::Debug,
+    T: Ord + Sync + Send + Copy,
 {
     pub data: &'a mut [T], // that's where it starts and should be after it's merged
     pub buffer: &'a mut [T], // that's where it temporarily might be
@@ -17,7 +17,7 @@ where
 
 impl<'a, T> MergeResult<'a, T>
 where
-    T: Ord + Sync + Send + Copy + std::fmt::Debug,
+    T: Ord + Sync + Send + Copy,
 {
     pub fn new(data: &'a mut [T], buffer: &'a mut [T]) -> MergeResult<'a, T> {
         assert_eq!(data.len(), buffer.len());

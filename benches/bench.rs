@@ -1,59 +1,10 @@
-use criterion::BenchmarkGroup;
+use adaptive_algorithms::adaptive_bench::*;
 use criterion::*;
-use mergesort::{mergesort, steal};
+use mergesort::mergesort;
 use rayon::prelude::*;
+use rayon_adaptive::adaptive_sort;
 extern crate num;
 extern crate rand;
-
-
-type Group<'a> = BenchmarkGroup<'a, criterion::measurement::WallTime>;
-struct Tester<'a, T: 'a> {
-    numbers: Vec<T>,
-    checksum: T,
-    tests: Vec<Box<dyn Test<T>>>,
-    group: Group<'a>,
-}
-impl<'a, T> Tester<'a, T>
-where
-    T: num::Integer + std::fmt::Debug + std::iter::Sum<T> + Copy + Default,
-{
-    fn verify(checksum: T, numbers: Vec<T>) {
-        assert_eq!(numbers.iter().cloned().sum::<T>(), checksum);
-        assert!(numbers.windows(2).all(|w| w[0] <= w[1]));
-    }
-    fn new(numbers: Vec<T>, tests: Vec<Box<dyn Test<T>>>, group: Group<'a>) -> Self {
-        let checksum: T = numbers.iter().cloned().sum();
-        Tester {
-            numbers,
-            checksum,
-            tests,
-            group,
-        }
-    }
-    fn run(&mut self) {
-        for test in &self.tests {
-            let numbers = self.numbers.clone();
-            // let mut group = self.group.clone();;
-            let group = &mut self.group;
-            let checksum = self.checksum;
-            group.bench_with_input(
-                test.id(),
-                // BenchmarkId::new(format!("Adaptive_{}", 2), size),
-                &numbers,
-                |b, numbers| {
-                    b.iter_batched(
-                        || numbers.clone(),
-                        |mut numbers| {
-                            test.run(&mut numbers);
-                            Tester::verify(checksum, numbers);
-                        },
-                        BatchSize::SmallInput,
-                    );
-                },
-            );
-        }
-    }
-}
 
 // pub fn comparison() {
 //     let pool = rayon_logs::ThreadPoolBuilder::new()
@@ -85,123 +36,101 @@ where
 //     println!("generated comparison.html");
 // }
 
-trait Test<T> {
-    fn run(&self, numbers: &mut Vec<T>) -> ();
-    fn name(&self) -> &'static str;
-    fn id(&self) -> BenchmarkId;
+struct MergeSort<'a, T> {
+    original: &'a Vec<T>,
+    data: Vec<T>,
 }
 
-struct Adaptive {
-    t: rayon::ThreadPool,
-    num_threads: usize,
-    steal_counter: usize,
-}
-impl<T> Test<T> for Adaptive
-where
-    T: num::Integer + std::fmt::Debug + Copy + Sync + Send,
-{
-    fn run(&self, mut numbers: &mut Vec<T>) {
-        self.t.install(|| mergesort(&mut numbers));
+impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for MergeSort<'a, T> {
+    fn start(&mut self) {
+        mergesort(&mut self.data);
     }
     fn name(&self) -> &'static str {
-        "Adaptive"
+        "Adaptive Mergesort"
     }
-    fn id(&self) -> BenchmarkId {
-        BenchmarkId::new(format!("Adaptive_{}", self.steal_counter), self.num_threads)
+    fn reset(&mut self) {
+        self.data = self.original.clone();
     }
 }
-impl Adaptive {
-    fn new(num_threads: usize, steal_counter: usize) -> Self {
-        Adaptive {
-            t: rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .steal_callback(move |x| steal::steal(steal_counter, x))
-                .build()
-                .unwrap(),
-            num_threads,
-            steal_counter,
+impl<'a, T: Clone> MergeSort<'a, T> {
+    fn new(data: &'a Vec<T>) -> Self {
+        MergeSort {
+            original: data,
+            data: data.clone(),
         }
     }
 }
-struct RayonAdaptive {
-    t: rayon::ThreadPool,
-    num_threads: usize,
+struct RayonAdaptive<'a, T> {
+    original: &'a Vec<T>,
+    data: Vec<T>,
 }
-impl<T> Test<T> for RayonAdaptive
-where
-    T: num::Integer + std::fmt::Debug + Copy + Sync + Send,
-{
-    fn run(&self, numbers: &mut Vec<T>) {
-        self.t.install(|| rayon_adaptive::adaptive_sort(numbers));
+
+impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for RayonAdaptive<'a, T> {
+    fn start(&mut self) {
+        adaptive_sort(&mut self.data);
     }
     fn name(&self) -> &'static str {
-        "Adaptive"
+        "Rayon-Adaptive Mergesort"
     }
-    fn id(&self) -> BenchmarkId {
-        BenchmarkId::new("Rayon-Adaptive", self.num_threads)
+    fn reset(&mut self) {
+        self.data = self.original.clone();
     }
 }
-impl RayonAdaptive {
-    fn new(num_threads: usize) -> Self {
+impl<'a, T: Clone> RayonAdaptive<'a, T> {
+    fn new(data: &'a Vec<T>) -> Self {
         RayonAdaptive {
-            t: rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build()
-                .unwrap(),
-            num_threads,
+            original: data,
+            data: data.clone(),
         }
     }
 }
 
-struct Rayon {
-    t: rayon::ThreadPool,
-    num_threads: usize,
+struct Rayon<'a, T> {
+    original: &'a Vec<T>,
+    data: Vec<T>,
 }
-impl<T> Test<T> for Rayon
-where
-    T: num::Integer + std::fmt::Debug + Copy + Sync + Send,
-{
-    fn run(&self, numbers: &mut Vec<T>) {
-        self.t.install(|| numbers.par_sort());
+
+impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for Rayon<'a, T> {
+    fn start(&mut self) {
+        self.data.par_sort();
     }
     fn name(&self) -> &'static str {
-        "Rayon"
+        "Rayon par_sort()"
     }
-    fn id(&self) -> BenchmarkId {
-        BenchmarkId::new("Rayon", self.num_threads)
+    fn reset(&mut self) {
+        self.data = self.original.clone();
     }
 }
-impl Rayon {
-    fn new(num_threads: usize) -> Self {
+impl<'a, T: Clone> Rayon<'a, T> {
+    fn new(data: &'a Vec<T>) -> Self {
         Rayon {
-            t: rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build()
-                .unwrap(),
-            num_threads,
+            original: data,
+            data: data.clone(),
         }
     }
 }
-struct Single {
-    num_threads: usize,
+struct Single<'a, T> {
+    original: &'a Vec<T>,
+    data: Vec<T>,
 }
-impl<T> Test<T> for Single
-where
-    T: num::Integer + std::fmt::Debug + Copy + Sync + Send,
-{
-    fn run(&self, numbers: &mut Vec<T>) {
-        numbers.sort();
+
+impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for Single<'a, T> {
+    fn start(&mut self) {
+        self.data.sort();
     }
     fn name(&self) -> &'static str {
-        "Single"
+        "Sequential Sort"
     }
-    fn id(&self) -> BenchmarkId {
-        BenchmarkId::new("Single", self.num_threads)
+    fn reset(&mut self) {
+        self.data = self.original.clone();
     }
 }
-impl Single {
-    fn new(num_threads: usize) -> Self {
-        Single { num_threads }
+impl<'a, T: Clone> Single<'a, T> {
+    fn new(data: &'a Vec<T>) -> Self {
+        Single {
+            original: data,
+            data: data.clone(),
+        }
     }
 }
 
@@ -209,14 +138,14 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("MergeSorting");
     group.warm_up_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
-    let v: Vec<u32> = std::iter::repeat_with(rand::random)
+    let v_20: Vec<u32> = std::iter::repeat_with(rand::random)
         .take(2usize.pow(20))
         // .map(|x: u32| x % 1_000_000)
         .collect();
-    // let v_21: Vec<u32> = std::iter::repeat_with(rand::random)
-    //     .take(2usize.pow(20))
-    //     .map(|x: u32| x % 1_000_000)
-    //     .collect();
+    let v_21: Vec<u32> = std::iter::repeat_with(rand::random)
+        .take(2usize.pow(21))
+        // .map(|x: u32| x % 1_000_000)
+        .collect();
 
     let cpus: Vec<usize> = vec![1, 2, 3, 4, 8, 16, 24, 32]
         .iter()
@@ -224,21 +153,30 @@ fn bench(c: &mut Criterion) {
         .cloned()
         .collect();
 
-    let mut test: Vec<Box<dyn Test<u32>>> = vec![];
-    for i in &cpus {
-        for s in vec![6,8] {
-            let x= Box::new(Adaptive::new(*i, s));
-            test.push(x);
+    let mut tests: Vec<TestConfig<u32>> = vec![];
+    let data = vec![&v_20, &v_21];
+    for v in &data { 
+        let test = Box::new(Single::new(&v));
+        let x = TestConfig::new(v.len(), 1, None, test);
+        tests.push(x);
+
+        for i in &cpus {
+            for s in vec![0, 6, 8] {
+                let test = Box::new(MergeSort::new(&v));
+                let x = TestConfig::new(v.len(), *i, Some(s), test);
+                tests.push(x);
+            }
+            let test = Box::new(RayonAdaptive::new(&v));
+            let x = TestConfig::new(v.len(), *i, None, test);
+            tests.push(x);
+
+            let test = Box::new(Rayon::new(&v));
+            let x = TestConfig::new(v.len(), *i, None, test);
+            tests.push(x);
         }
-        let x  = Box::new(RayonAdaptive::new(*i));
-        test.push(x);
-        let x  = Box::new(Rayon::new(*i));
-        test.push(x);
     }
-    let x  = Box::new(Single::new(1));
-    test.push(x);
-    let mut t = Tester::new(v, test, group);
-    // let mut t = Tester::new(v_21, test, group);
+
+    let mut t = Tester::new(tests, group, None);
     t.run();
 
     // group.finish();

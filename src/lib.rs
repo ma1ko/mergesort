@@ -1,13 +1,14 @@
 #[macro_use]
 extern crate lazy_static;
 pub mod merge;
-pub mod rayon;
+// pub mod rayon;
 mod slice_merge;
 pub mod steal;
-pub mod task;
+// pub mod task;
 use rand::prelude::*;
 
-use crate::task::Task;
+use adaptive_algorithms::Task;
+use adaptive_algorithms::rayon;
 // lazy_static! {
 //     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
 //         .map(|x| x.parse::<usize>().unwrap())
@@ -31,17 +32,20 @@ fn random_vec(size: usize) -> Vec<u64> {
     let checksum: u64 = v.iter().cloned().sum();
     println!("Finished generating");
 
-    let pool = rayon::get_default_thread_pool();
     #[cfg(feature = "logs")]
     {
-        let (_, log) = pool.logging_install(|| mergesort(&mut v));
-        println!("Saving log");
-        log.save("test").expect("failed saving log");
-        println!("Saving svg");
-        log.save_svg("test.svg").expect("failed saving svg");
+        assert!(false); // FIXME
+        // let pool = rayon::get_adaptive_thread_pool();
+        // let (_, log) = pool.logging_install(|| mergesort(&mut v));
+        // println!("Saving log");
+        // log.save("test").expect("failed saving log");
+        // println!("Saving svg");
+        // log.save_svg("test.svg").expect("failed saving svg");
     }
-    #[cfg(not(feature = "logs"))]
+    #[cfg(not(feature = "logs"))] {
+    let pool = rayon::get_adaptive_thread_pool();
     let _ = pool.install(|| mergesort(&mut v));
+    }
     assert_eq!(checksum, v.iter().sum::<u64>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
     println!("Success!");
@@ -55,7 +59,7 @@ pub fn test() -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn mergesort<T>(data: &mut [T])
 where
-    T: Ord + Sync + Send + Copy + std::fmt::Debug,
+    T: Ord + Sync + Send + Copy,
 {
     let mut tmp_slice: Vec<T> = Vec::with_capacity(data.len());
     unsafe { tmp_slice.set_len(data.len()) }
@@ -94,7 +98,7 @@ where
             .pieces
             .last_mut()
             .unwrap()
-            .merge(other, task::NOTHING);
+            .merge(other, adaptive_algorithms::task::NOTHING);
     }
     assert!(mergesort.data.windows(2).all(|w| w[0] <= w[1]));
     // we need to check where the output landed, it's either in the original data or in the
@@ -133,7 +137,7 @@ pub fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
 
 struct Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy + std::fmt::Debug,
+    T: Ord + Sync + Send + Copy 
 {
     data: &'a mut [T],
     to: &'a mut [T],
@@ -142,7 +146,7 @@ where
 }
 impl<'a, T> Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy + std::fmt::Debug,
+    T: Ord + Sync + Send + Copy
 {
     fn pieces_len(&self) -> Vec<usize> {
         // mostly for debugging
@@ -197,7 +201,7 @@ where
 use std::vec::Vec;
 impl<'a, T> Task for Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy + std::fmt::Debug,
+    T: Ord + Sync + Send + Copy 
 {
     fn step(&mut self) {
         // this seems to be required after a split sometimes
@@ -222,7 +226,7 @@ where
     fn is_finished(&self) -> bool {
         self.data.is_empty()
     }
-    fn split(&mut self) -> Self {
+    fn split(&mut self, mut runner: impl FnMut(&mut Self, &mut Self) ) {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
         // we want to split off about half the slice, but also the right part needs to be a
@@ -237,19 +241,19 @@ where
         let right_data = cut_off_right(&mut self.data, split_index - already_done);
 
         // Other side
-        let other: Mergesort<'a, T> = Mergesort {
+        let mut other: Mergesort<'a, T> = Mergesort {
             pieces: Vec::new(),
             data: right_data,
             to: right_to,
             blocksize: self.blocksize,
         };
         // println!("Split {} to {}", self.data.len(), other.data.len());
-        return other;
+        runner(self, &mut other);
     }
     fn can_split(&self) -> bool {
         return self.data.len() > self.blocksize * 32;
     }
-    fn fuse(&mut self, mut other: Self) {
+    fn fuse(&mut self, other: &mut Self) {
         self.merge();
         self.pieces.append(&mut other.pieces);
         self.merge();
