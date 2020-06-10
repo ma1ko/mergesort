@@ -20,11 +20,10 @@ adaptive_algorithms = {git="https://github.com/ma1ko/adaptive_algorithms"}
 
 [dev-dependencies]
 criterion = {git = "https://github.com/ma1ko/criterion.rs"}
-rayon_logs = {git = "https://github.com/ma1ko/rayon-logs"}
 
 
 [features]
-logs = ["rayon_logs"]
+logs = ["rayon_logs", "rayon_adaptive/logs", "adaptive_algorithms/logs"]
 
 [[bench]]
 name = "bench"

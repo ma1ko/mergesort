@@ -7,8 +7,8 @@ pub mod steal;
 // pub mod task;
 use rand::prelude::*;
 
-use adaptive_algorithms::Task;
 use adaptive_algorithms::rayon;
+use adaptive_algorithms::Task;
 // lazy_static! {
 //     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
 //         .map(|x| x.parse::<usize>().unwrap())
@@ -17,34 +17,34 @@ use adaptive_algorithms::rayon;
 // }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
-    let v: Vec<usize> = std::iter::repeat_with(rand::random)
-        // .take(2usize.pow(22))
-        .take(16000000)
-        // .map(|x: usize| x % 1_000_000)
-        .collect();
-fn random_vec(size: usize) -> Vec<u64> {
-    let mut v: Vec<u64> = (0..(size as u64)).collect();
-    v.shuffle(&mut thread_rng());
-    v
-}
-    let mut v = random_vec(16000000);
+    // let _v: Vec<usize> = std::iter::repeat_with(rand::random)
+    //     .take(2usize.pow(22))
+    //     .take(16000000)
+    //     .map(|x: usize| x % 1_000_000)
+    //     .collect();
+    fn random_vec(size: usize) -> Vec<u64> {
+        let mut v: Vec<u64> = (0..(size as u64)).collect();
+        v.shuffle(&mut thread_rng());
+        v
+    }
+    let mut v = random_vec(100000);
 
     let checksum: u64 = v.iter().cloned().sum();
     println!("Finished generating");
 
     #[cfg(feature = "logs")]
     {
-        assert!(false); // FIXME
-        // let pool = rayon::get_adaptive_thread_pool();
-        // let (_, log) = pool.logging_install(|| mergesort(&mut v));
-        // println!("Saving log");
-        // log.save("test").expect("failed saving log");
+        let pool = rayon::get_adaptive_thread_pool();
+        let (_, log) = pool.logging_install(|| mergesort(&mut v));
+        println!("Saving log");
+        log.save("test").expect("failed saving log");
         // println!("Saving svg");
         // log.save_svg("test.svg").expect("failed saving svg");
     }
-    #[cfg(not(feature = "logs"))] {
-    let pool = rayon::get_adaptive_thread_pool();
-    let _ = pool.install(|| mergesort(&mut v));
+    #[cfg(not(feature = "logs"))]
+    {
+        let pool = rayon::get_adaptive_thread_pool();
+        let _ = pool.install(|| mergesort(&mut v));
     }
     assert_eq!(checksum, v.iter().sum::<u64>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
@@ -137,7 +137,7 @@ pub fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
 
 struct Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy 
+    T: Ord + Sync + Send + Copy,
 {
     data: &'a mut [T],
     to: &'a mut [T],
@@ -146,7 +146,7 @@ where
 }
 impl<'a, T> Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy
+    T: Ord + Sync + Send + Copy,
 {
     fn pieces_len(&self) -> Vec<usize> {
         // mostly for debugging
@@ -201,7 +201,7 @@ where
 use std::vec::Vec;
 impl<'a, T> Task for Mergesort<'a, T>
 where
-    T: Ord + Sync + Send + Copy 
+    T: Ord + Sync + Send + Copy,
 {
     fn step(&mut self) {
         // this seems to be required after a split sometimes
@@ -226,7 +226,7 @@ where
     fn is_finished(&self) -> bool {
         self.data.is_empty()
     }
-    fn split(&mut self, mut runner: impl FnMut(&mut Self, &mut Self) ) {
+    fn split(&mut self, mut runner: impl FnMut(&mut Self, &mut Self)) {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
         // we want to split off about half the slice, but also the right part needs to be a
