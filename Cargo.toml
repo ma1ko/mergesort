@@ -17,9 +17,11 @@ itertools = "*"
 num_cpus = "*"
 num = "*"
 adaptive_algorithms = {git="https://github.com/ma1ko/adaptive_algorithms"}
+#adaptive_algorithms = {path="../adaptive_algorithms"}
 
 [dev-dependencies]
 criterion = {git = "https://github.com/ma1ko/criterion.rs"}
+#criterion = {path = "../criterion.rs"}
 
 
 [features]

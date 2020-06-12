@@ -51,6 +51,11 @@ impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for MergeSort<'a, T> {
     fn reset(&mut self) {
         self.data = self.original.clone();
     }
+    fn verify(&self, _result: &T) -> bool {
+        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        true
+
+    }
 }
 impl<'a, T: Clone> MergeSort<'a, T> {
     fn new(data: &'a Vec<T>) -> Self {
@@ -124,6 +129,9 @@ impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for Single<'a, T> {
     fn reset(&mut self) {
         self.data = self.original.clone();
     }
+    fn get_result(&self) -> T{
+        return self.data[0];
+    }
 }
 impl<'a, T: Clone> Single<'a, T> {
     fn new(data: &'a Vec<T>) -> Self {
@@ -155,7 +163,7 @@ fn bench(c: &mut Criterion) {
 
     let mut tests: Vec<TestConfig<u32>> = vec![];
     let data = vec![&v_20, &v_21];
-    for v in &data { 
+    for v in &data {
         let test = Box::new(Single::new(&v));
         let x = TestConfig::new(v.len(), 1, None, test);
         tests.push(x);
@@ -176,7 +184,8 @@ fn bench(c: &mut Criterion) {
         }
     }
 
-    let mut t = Tester::new(tests, group, None);
+    let test =Single::new(&v_20);
+    let mut t = Tester::new(tests, group, Some(test.get_result()));
     t.run();
 
     // group.finish();

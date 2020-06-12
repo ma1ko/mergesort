@@ -88,7 +88,7 @@ where
         return diff(self.output, self.output_end) == 0;
     }
 
-    fn split(&mut self, mut runner: impl FnMut(&mut Self, &mut Self)) {
+    fn split(&mut self, mut runner: impl FnMut(Vec<&mut Self>), steal_counter: usize){
         
         use std::slice::{from_raw_parts, from_raw_parts_mut};
         unsafe {
@@ -119,7 +119,7 @@ where
             self.left_end = self.left.add(left_left.len());
             self.right_end = self.right.add(right_left.len());
             self.output_end = self.output.add(output_left.len());
-            runner(self, &mut other);
+            runner(vec![self, &mut other]);
         }
     }
     fn can_split(&self) -> bool {

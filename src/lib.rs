@@ -34,7 +34,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(feature = "logs")]
     {
-        let pool = rayon::get_adaptive_thread_pool();
+        let pool = rayon::get_thread_pool();
         let (_, log) = pool.logging_install(|| mergesort(&mut v));
         println!("Saving log");
         log.save("test").expect("failed saving log");
@@ -43,7 +43,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(not(feature = "logs"))]
     {
-        let pool = rayon::get_adaptive_thread_pool();
+        let pool = rayon::get_thread_pool();
         let _ = pool.install(|| mergesort(&mut v));
     }
     assert_eq!(checksum, v.iter().sum::<u64>(), "failed merging");
@@ -226,7 +226,7 @@ where
     fn is_finished(&self) -> bool {
         self.data.is_empty()
     }
-    fn split(&mut self, mut runner: impl FnMut(&mut Self, &mut Self)) {
+    fn split(&mut self, mut runner: impl FnMut(Vec<&mut Self>), steal_counter: usize) {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
         // we want to split off about half the slice, but also the right part needs to be a
@@ -248,7 +248,7 @@ where
             blocksize: self.blocksize,
         };
         // println!("Split {} to {}", self.data.len(), other.data.len());
-        runner(self, &mut other);
+        runner(vec![self, &mut other]);
     }
     fn can_split(&self) -> bool {
         return self.data.len() > self.blocksize * 32;

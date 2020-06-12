@@ -1,5 +1,4 @@
 use mergesort::mergesort;
-use mergesort::rayon;
 #[test]
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
@@ -13,14 +12,14 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             right: x,
         })
         .collect();
-    let pool = rayon::get_default_thread_pool();
+    let pool = adaptive_algorithms::rayon::get_thread_pool();
     // let _  = pool.install(|| mergesort(&mut v));
-    let _  = pool.install(|| mergesort(&mut v));
+    let _ = pool.install(|| mergesort(&mut v));
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
     assert!(v
         .windows(2)
         .all(|w| w[0] != w[1] || w[0].right <= w[1].right));
-        // format!("{:?}", v));
+    // format!("{:?}", v));
     Ok(())
 }
 
