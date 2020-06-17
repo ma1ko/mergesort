@@ -17,11 +17,6 @@ use adaptive_algorithms::Task;
 // }
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
-    // let _v: Vec<usize> = std::iter::repeat_with(rand::random)
-    //     .take(2usize.pow(22))
-    //     .take(16000000)
-    //     .map(|x: usize| x % 1_000_000)
-    //     .collect();
     fn random_vec(size: usize) -> Vec<u64> {
         let mut v: Vec<u64> = (0..(size as u64)).collect();
         v.shuffle(&mut thread_rng());
@@ -169,10 +164,12 @@ where
                 // we want to be able to work on this element while also working on the merge at
                 // the same time. There should be a better that disabling the borrow checker here,
                 // but it works for now
-                let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
+                // let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
 
-                rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
-            // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, task::NOTHING));
+                // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
+                // rayon::subgraph("merging", a.len() + b.len(), || {
+                a.merge(b, adaptive_algorithms::task::NOTHING)
+            // });
             } else {
                 break; // nothing to do
             }
@@ -257,5 +254,8 @@ where
         self.merge();
         self.pieces.append(&mut other.pieces);
         self.merge();
+    }
+    fn work(&self) -> Option<(&'static str, usize)> {
+        Some(("Sorting", self.data.len()))
     }
 }

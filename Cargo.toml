@@ -26,6 +26,7 @@ criterion = {git = "https://github.com/ma1ko/criterion.rs"}
 
 [features]
 logs = ["rayon_logs", "rayon_adaptive/logs", "adaptive_algorithms/logs"]
+statistics = ["adaptive_algorithms/statistics"]
 
 [[bench]]
 name = "bench"
