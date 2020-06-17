@@ -1,6 +1,6 @@
+use adaptive_algorithms::Task;
 use std::mem;
 use std::ptr;
-use adaptive_algorithms::Task;
 
 pub struct SliceMerge<T>
 where
@@ -88,8 +88,7 @@ where
         return diff(self.output, self.output_end) == 0;
     }
 
-    fn split(&mut self, mut runner: impl FnMut(Vec<&mut Self>), steal_counter: usize){
-        
+    fn split(&mut self, mut runner: impl FnMut(&mut Vec<&mut Self>), steal_counter: usize) {
         use std::slice::{from_raw_parts, from_raw_parts_mut};
         unsafe {
             // get back the slices
@@ -98,7 +97,7 @@ where
             let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
 
             // split on side at half (we might want to split the bigger side (?)
-            let (left_index, right_index) = split_for_merge(left,right, &|a,b| a < b );
+            let (left_index, right_index) = split_for_merge(left, right, &|a, b| a < b);
             let (left_left, left_right) = left.split_at(left_index);
 
             // split the right side at the same element than the left side
@@ -119,19 +118,15 @@ where
             self.left_end = self.left.add(left_left.len());
             self.right_end = self.right.add(right_left.len());
             self.output_end = self.output.add(output_left.len());
-            runner(vec![self, &mut other]);
+            runner(&mut vec![self, &mut other]);
         }
     }
     fn can_split(&self) -> bool {
-        return self.work_left() > self.work_size * 32
+        return self.work_left() > self.work_size * 32;
     }
     fn fuse(&mut self, _other: &mut Self) {
         // Nothing to do here actually
     }
-
-    // fn fuse(&mut self, _other: Self) {
-    //     // Nothing to do here?
-    // }
 }
 
 // difference between two pointer (it's in  std::ptr but only on nightly)

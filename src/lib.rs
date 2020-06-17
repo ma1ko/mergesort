@@ -226,7 +226,7 @@ where
     fn is_finished(&self) -> bool {
         self.data.is_empty()
     }
-    fn split(&mut self, mut runner: impl FnMut(Vec<&mut Self>), steal_counter: usize) {
+    fn split(&mut self, mut runner: impl FnMut(&mut Vec<&mut Self>), steal_counter: usize) {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
         // we want to split off about half the slice, but also the right part needs to be a
@@ -248,7 +248,7 @@ where
             blocksize: self.blocksize,
         };
         // println!("Split {} to {}", self.data.len(), other.data.len());
-        runner(vec![self, &mut other]);
+        runner(&mut vec![self, &mut other]);
     }
     fn can_split(&self) -> bool {
         return self.data.len() > self.blocksize * 32;
