@@ -18,8 +18,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (_, log) = pool.logging_install(|| mergesort(&mut v));
         println!("Saving log");
         log.save("test").expect("failed saving log");
-        // println!("Saving svg");
-        // log.save_svg("test.svg").expect("failed saving svg");
+        log.save_svg("log.svg").expect("failed saving svg");
     }
     #[cfg(not(feature = "logs"))]
     {

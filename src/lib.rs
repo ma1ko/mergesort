@@ -9,19 +9,15 @@ use rand::prelude::*;
 
 use adaptive_algorithms::rayon;
 use adaptive_algorithms::Task;
-// lazy_static! {
-//     static ref MIN_BLOCK_SIZE: usize = std::env::var("BLOCKSIZE")
-//         .map(|x| x.parse::<usize>().unwrap())
-//         .unwrap_or(2usize.pow(10));
-//     static ref MIN_SPLIT_SIZE: usize = 32 * *MIN_BLOCK_SIZE;
-// }
+
+fn random_vec(size: usize) -> Vec<u64> {
+    let mut v: Vec<u64> = (0..(size as u64)).collect();
+    v.shuffle(&mut thread_rng());
+    v
+}
+
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
-    fn random_vec(size: usize) -> Vec<u64> {
-        let mut v: Vec<u64> = (0..(size as u64)).collect();
-        v.shuffle(&mut thread_rng());
-        v
-    }
     let mut v = random_vec(100000);
 
     let checksum: u64 = v.iter().cloned().sum();
@@ -47,9 +43,22 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// #[test]
-pub fn test() -> Result<(), Box<dyn std::error::Error>> {
-    main()
+#[test]
+pub fn test() {
+    for i in 1000000..1000500 {
+        // println!("{}", i);
+        test_with(i);
+    }
+}
+pub fn test_with(num_elements: usize) {
+    let mut v = random_vec(num_elements);
+
+    let checksum: u64 = v.iter().cloned().sum();
+
+    let pool = rayon::get_thread_pool();
+    let _ = pool.install(|| mergesort(&mut v));
+    assert_eq!(checksum, v.iter().sum::<u64>(), "wrong checksum!");
+    assert!(v.windows(2).all(|w| w[0] <= w[1]));
 }
 
 pub fn mergesort<T>(data: &mut [T])
@@ -99,9 +108,10 @@ where
     // we need to check where the output landed, it's either in the original data or in the
     // buffer. If it's in the buffer, we need to copy it over
     if data_ptr != mergesort.pieces[0].data.as_mut_ptr() {
-        rayon::subgraph("merging", tmp_slice.len(), || unsafe {
+        // rayon::subgraph("merging", tmp_slice.len(), ||
+        unsafe {
             std::ptr::copy_nonoverlapping(tmp_slice.as_ptr(), data_ptr, len);
-        });
+        } // );
     };
     // keep the buffer size to 0 so it doesn't deallocate anything
     // see : https://doc.rust-lang.org/src/alloc/slice.rs.html#966
@@ -117,13 +127,6 @@ pub fn cut_off_left<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
     left
 }
 pub fn cut_off_right<'a, T>(s: &mut &'a mut [T], mid: usize) -> &'a mut [T] {
-    let mid = if mid <= s.len() {
-        mid
-    } else {
-        println!("FAIL mid: {}, len: {}", mid, s.len());
-        assert!(false);
-        s.len() - 1
-    };
     let tmp: &'a mut [T] = ::std::mem::replace(&mut *s, &mut []);
     let (left, right) = tmp.split_at_mut(mid);
     *s = left;
@@ -160,6 +163,8 @@ where
                 // we can merge, remove last item
 
                 let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
+                // let mut tmp = vec![];
+                // std::mem::swap(&mut tmp, &mut self.pieces);
                 let a: &mut merge::MergeResult<'a, T> = &mut self.pieces.last_mut().unwrap();
                 // we want to be able to work on this element while also working on the merge at
                 // the same time. There should be a better that disabling the borrow checker here,
@@ -168,34 +173,20 @@ where
 
                 // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
                 // rayon::subgraph("merging", a.len() + b.len(), || {
-                a.merge(b, adaptive_algorithms::task::NOTHING)
-            // });
+                a.merge(b, adaptive_algorithms::task::NOTHING);
+            // a.merge(b, Some(self));
+
+            // std::mem::swap(&mut tmp, &mut self.pieces);
+            // for elem in tmp {
+            //     self.pieces.push(elem);
+            //     self.merge();
+            // }
             } else {
                 break; // nothing to do
             }
         }
     }
-
-    fn next(&self, i: usize) -> usize {
-        // find the next number that has only leading zeros in binary
-        // eg next(5) = next(0b101) = 0b110
-        // next(9) = next(0x1001) = 0x1100 = 12
-        // we need to have an amount of elements like this on the left to ensure that we can merge
-        // the result in the end
-        let mut highest = i.next_power_of_two() / 2;
-        // find first zero
-        while highest != 0 && i | highest == i {
-            highest /= 2;
-        }
-        let result = i & !(highest - 1);
-        if i != result {
-            result | highest
-        } else {
-            result
-        }
-    }
 }
-use std::vec::Vec;
 impl<'a, T> Task for Mergesort<'a, T>
 where
     T: Ord + Sync + Send + Copy,
@@ -211,7 +202,8 @@ where
         // Do some work: Split off and sort piece
         let work_size = std::cmp::min(self.blocksize, elem_left);
         let piece = cut_off_left(&mut self.data, work_size);
-        rayon::subgraph("actual sort", self.blocksize, || piece.sort());
+        // rayon::subgraph("actual sort", self.blocksize, || piece.sort());
+        piece.sort();
         let buffer = cut_off_left(&mut self.to, work_size);
         let merge = merge::MergeResult::new(piece, buffer);
         self.pieces.push(merge);
@@ -223,19 +215,55 @@ where
     fn is_finished(&self) -> bool {
         self.data.is_empty()
     }
-    fn split(&mut self, mut runner: impl FnMut(&mut Vec<&mut Self>), steal_counter: usize) {
+    fn split(&mut self, mut runner: impl FnMut(&mut Vec<&mut Self>), _steal_counter: usize) {
         // split the data in two, sort them in two tasks
         let elem_left = self.data.len();
-        // we want to split off about half the slice, but also the right part needs to be a
-        // power of two, so we take the slice, find the next power of two, and give half of
-        // that to the other task. That means the other task will get more work.
+
         let already_done = self.pieces_len().iter().sum::<usize>();
         let total = already_done + elem_left;
-        let split_index = self.next(already_done.max(total.next_power_of_two() / 2));
+        if total.next_power_of_two() != total {
+            // Special case: we don't have a power of two elements: split off the remainder and
+            // sort that
+            let leftover = total - (total.next_power_of_two() / 2);
+            // split off a part for the other task
+            if leftover + already_done >= total {
+                // we are currently sorting the remainder, this isn't really splittable anymore
+                // this is a very rare case
+                runner(&mut vec![self]);
+                return;
+            }
+            let right_to = cut_off_right(&mut self.to, total - leftover - already_done);
+            let right_data = cut_off_right(&mut self.data, total - leftover - already_done);
+
+            // Other side
+            let mut other: Mergesort<'a, T> = Mergesort {
+                pieces: Vec::new(),
+                data: right_data,
+                to: right_to,
+                blocksize: self.blocksize,
+            };
+
+            runner(&mut vec![self, &mut other]);
+            return;
+        }
+        assert!(
+            total.next_power_of_two() == total,
+            "needs power of two elements"
+        );
+        // we want to split off about half the slice, but also the right part needs to be a
+        // power of two, so we take the slice, find the next power of two, and give half of
+        // that to the other task.
+
+        // We need to keep at least half the array, or the later merging won't work since the right
+        // half has a bigger block than the left
+        let min_split = total / 2;
+
+        let split_index = elem_left.next_power_of_two() / 2;
+        let actual_split = (total - split_index).max(min_split);
 
         // split off a part for the other task
-        let right_to = cut_off_right(&mut self.to, split_index - already_done);
-        let right_data = cut_off_right(&mut self.data, split_index - already_done);
+        let right_to = cut_off_right(&mut self.to, actual_split - already_done);
+        let right_data = cut_off_right(&mut self.data, actual_split - already_done);
 
         // Other side
         let mut other: Mergesort<'a, T> = Mergesort {
@@ -244,7 +272,6 @@ where
             to: right_to,
             blocksize: self.blocksize,
         };
-        // println!("Split {} to {}", self.data.len(), other.data.len());
         runner(&mut vec![self, &mut other]);
     }
     fn can_split(&self) -> bool {
@@ -252,6 +279,10 @@ where
     }
     fn fuse(&mut self, other: &mut Self) {
         self.merge();
+        // for x in other.pieces.iter_mut() {
+        //     self.pieces.push(x);
+        //     self.merge();
+        // }
         self.pieces.append(&mut other.pieces);
         self.merge();
     }
