@@ -7,6 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+#rayon = {path = "../rayon"}
 rayon = {git = "https://github.com/ma1ko/rayon"}
 rayon_logs = { optional = true, git = "https://github.com/ma1ko/rayon-logs"}
 rayon_adaptive = {git = "https://github.com/ma1ko/rayon-adaptive"}
@@ -17,7 +18,7 @@ itertools = "*"
 num_cpus = "*"
 num = "*"
 adaptive_algorithms = {git="https://github.com/ma1ko/adaptive_algorithms"}
-#adaptive_algorithms = {path="../adaptive_algorithms"}
+# adaptive_algorithms = {path="../adaptive_algorithms"}
 
 [dev-dependencies]
 criterion = {git = "https://github.com/ma1ko/criterion.rs"}

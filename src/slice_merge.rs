@@ -15,7 +15,7 @@ where
     pub work_size: usize,
 }
 unsafe impl<T> Send for SliceMerge<T> where T: Copy + Ord {}
-unsafe impl<T> Sync for SliceMerge<T> where T: Copy + Ord {}
+// unsafe impl<T> Sync for SliceMerge<T> where T: Copy + Ord {}
 impl<T> SliceMerge<T>
 where
     T: Copy + Ord,
@@ -88,7 +88,7 @@ where
         return diff(self.output, self.output_end) == 0;
     }
 
-    fn split(&mut self, mut runner: impl FnMut(&mut Vec<&mut Self>), steal_counter: usize) {
+    fn split(&mut self, mut runner: impl FnMut(&mut Vec<&mut Self>), _steal_counter: usize) {
         use std::slice::{from_raw_parts, from_raw_parts_mut};
         unsafe {
             // get back the slices
@@ -118,6 +118,8 @@ where
             self.left_end = self.left.add(left_left.len());
             self.right_end = self.right.add(right_left.len());
             self.output_end = self.output.add(output_left.len());
+            // println!("Parallel Merge: Left: , right: ",);
+
             runner(&mut vec![self, &mut other]);
         }
     }

@@ -12,19 +12,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let checksum: u64 = v.iter().cloned().sum();
     println!("Finished generating");
 
-    #[cfg(feature = "logs")]
-    {
-        let pool = rayon::get_thread_pool();
-        let (_, log) = pool.logging_install(|| mergesort(&mut v));
-        println!("Saving log");
-        log.save("test").expect("failed saving log");
-        log.save_svg("log.svg").expect("failed saving svg");
-    }
-    #[cfg(not(feature = "logs"))]
-    {
-        let pool = rayon::get_thread_pool();
-        let _ = pool.install(|| mergesort(&mut v));
-    }
+    let pool = rayon::get_thread_pool();
+    pool.install(|| {
+        // rayon::join(|| {}, || {});
+        mergesort(&mut v);
+    });
     assert_eq!(checksum, v.iter().sum::<u64>(), "failed merging");
     assert!(v.windows(2).all(|w| w[0] <= w[1]));
     #[cfg(feature = "statistics")]

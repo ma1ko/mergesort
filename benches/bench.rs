@@ -42,19 +42,15 @@ struct MergeSort<'a, T> {
 }
 
 impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for MergeSort<'a, T> {
-    fn start(&mut self) {
+    fn start(&mut self) -> Option<T> {
+        *self = MergeSort::new(self.original);
+        rayon::join(|| {}, || {});
         mergesort(&mut self.data);
+        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        None
     }
     fn name(&self) -> &'static str {
         "Adaptive Mergesort"
-    }
-    fn reset(&mut self) {
-        self.data = self.original.clone();
-    }
-    fn verify(&self, _result: &T) -> bool {
-        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
-        true
-
     }
 }
 impl<'a, T: Clone> MergeSort<'a, T> {
@@ -71,14 +67,14 @@ struct RayonAdaptive<'a, T> {
 }
 
 impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for RayonAdaptive<'a, T> {
-    fn start(&mut self) {
+    fn start(&mut self) -> Option<T> {
+        *self = RayonAdaptive::new(self.original);
         adaptive_sort(&mut self.data);
+        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        None
     }
     fn name(&self) -> &'static str {
         "Rayon-Adaptive Mergesort"
-    }
-    fn reset(&mut self) {
-        self.data = self.original.clone();
     }
 }
 impl<'a, T: Clone> RayonAdaptive<'a, T> {
@@ -96,14 +92,14 @@ struct Rayon<'a, T> {
 }
 
 impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for Rayon<'a, T> {
-    fn start(&mut self) {
+    fn start(&mut self) -> Option<T> {
+        *self = Rayon::new(self.original);
         self.data.par_sort();
+        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        None
     }
     fn name(&self) -> &'static str {
         "Rayon par_sort()"
-    }
-    fn reset(&mut self) {
-        self.data = self.original.clone();
     }
 }
 impl<'a, T: Clone> Rayon<'a, T> {
@@ -120,17 +116,14 @@ struct Single<'a, T> {
 }
 
 impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for Single<'a, T> {
-    fn start(&mut self) {
+    fn start(&mut self) -> Option<T> {
+        *self = Single::new(self.original);
         self.data.sort();
+        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        None
     }
     fn name(&self) -> &'static str {
         "Sequential Sort"
-    }
-    fn reset(&mut self) {
-        self.data = self.original.clone();
-    }
-    fn get_result(&self) -> T{
-        return self.data[0];
     }
 }
 impl<'a, T: Clone> Single<'a, T> {
@@ -144,16 +137,17 @@ impl<'a, T: Clone> Single<'a, T> {
 
 fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("MergeSorting");
-    group.warm_up_time(std::time::Duration::new(1, 0));
+    group.warm_up_time(std::time::Duration::new(0, 500));
+    group.measurement_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
     let v_20: Vec<u32> = std::iter::repeat_with(rand::random)
         .take(2usize.pow(20))
         // .map(|x: u32| x % 1_000_000)
         .collect();
-    let v_21: Vec<u32> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(21))
-        // .map(|x: u32| x % 1_000_000)
-        .collect();
+    // let v_21: Vec<u32> = std::iter::repeat_with(rand::random)
+    //     .take(2usize.pow(21))
+    //     // .map(|x: u32| x % 1_000_000)
+    //     .collect();
 
     let cpus: Vec<usize> = vec![1, 2, 3, 4, 8, 16, 24, 32]
         .iter()
@@ -162,30 +156,29 @@ fn bench(c: &mut Criterion) {
         .collect();
 
     let mut tests: Vec<TestConfig<u32>> = vec![];
-    let data = vec![&v_20, &v_21];
+    let data = vec![&v_20 /*&v_21*/];
     for v in &data {
-        let test = Box::new(Single::new(&v));
-        let x = TestConfig::new(v.len(), 1, None, test);
-        tests.push(x);
-
         for i in &cpus {
-            for s in vec![0, 6, 8] {
-                let test = Box::new(MergeSort::new(&v));
+            for s in vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20] {
+                let test = MergeSort::new(&v);
                 let x = TestConfig::new(v.len(), *i, Some(s), test);
                 tests.push(x);
             }
-            let test = Box::new(RayonAdaptive::new(&v));
+            let test = RayonAdaptive::new(&v);
             let x = TestConfig::new(v.len(), *i, None, test);
             tests.push(x);
 
-            let test = Box::new(Rayon::new(&v));
+            let test = Rayon::new(&v);
             let x = TestConfig::new(v.len(), *i, None, test);
             tests.push(x);
         }
+        let test = Single::new(&v);
+        let x = TestConfig::new(v.len(), 1, None, test);
+        tests.push(x);
     }
 
-    let test =Single::new(&v_20);
-    let mut t = Tester::new(tests, group, Some(test.get_result()));
+    // let test = Single::new(&v_20);
+    let mut t = Tester::new(tests, group, None);
     t.run();
 
     // group.finish();

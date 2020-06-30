@@ -75,7 +75,7 @@ where
         pieces: Vec::new(),
         blocksize: 256,
     };
-    mergesort.run_();
+    mergesort.run();
     // There might be many ordered non-sorted blocks left. That happens when we sort an input
     // that's not a power of two elements.
     assert!(
@@ -222,9 +222,9 @@ where
         let already_done = self.pieces_len().iter().sum::<usize>();
         let total = already_done + elem_left;
         if total.next_power_of_two() != total {
+            let leftover = total - (total.next_power_of_two() / 2);
             // Special case: we don't have a power of two elements: split off the remainder and
             // sort that
-            let leftover = total - (total.next_power_of_two() / 2);
             // split off a part for the other task
             if leftover + already_done >= total {
                 // we are currently sorting the remainder, this isn't really splittable anymore
@@ -272,6 +272,11 @@ where
             to: right_to,
             blocksize: self.blocksize,
         };
+        // println!(
+        //     "Left: {}, right: {}",
+        //     self.data.len() + already_done,
+        //     other.data.len()
+        // );
         runner(&mut vec![self, &mut other]);
     }
     fn can_split(&self) -> bool {

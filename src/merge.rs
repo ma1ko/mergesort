@@ -43,7 +43,7 @@ where
         self.data = buffer;
         self.buffer = data;
 
-        merge.run(f);
+        merge.run_with(f);
     }
 }
 
