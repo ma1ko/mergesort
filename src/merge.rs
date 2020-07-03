@@ -2,8 +2,7 @@ use crate::slice_merge;
 pub use adaptive_algorithms::Task;
 // use std::sync::atomic::AtomicUsize;
 
-const BLOCKSIZE : usize = 1024;
-
+const BLOCKSIZE: usize = 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>
@@ -12,7 +11,7 @@ where
 {
     pub data: &'a mut [T], // that's where it starts and should be after it's merged
     pub buffer: &'a mut [T], // that's where it temporarily might be
-    pub blocksize: usize,     // index in total
+    pub blocksize: usize,  // index in total
 }
 
 impl<'a, T> MergeResult<'a, T>
@@ -24,7 +23,7 @@ where
         MergeResult {
             data,
             buffer,
-            blocksize : BLOCKSIZE
+            blocksize: BLOCKSIZE,
         }
     }
     pub fn len(self: &Self) -> usize {
@@ -34,8 +33,8 @@ where
         self.data.windows(2).all(|w| w[0] <= w[1])
     }
 
-    pub fn merge(mut self: &mut Self, other: MergeResult<T>, f: Option<&mut impl Task>) {
-               let mut buffer = fuse_slices(self.buffer, other.buffer);
+    pub fn merge_with(mut self: &mut Self, other: MergeResult<T>, f: &mut impl Task) {
+        let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut merge =
             slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, self.blocksize);
         let data = fuse_slices(self.data, other.data);
@@ -43,7 +42,18 @@ where
         self.data = buffer;
         self.buffer = data;
 
-        merge.run_with(f);
+        merge.run_with(f)
+    }
+    pub fn merge(mut self: &mut Self, other: MergeResult<T>) {
+        let mut buffer = fuse_slices(self.buffer, other.buffer);
+        let mut merge =
+            slice_merge::SliceMerge::new(self.data, other.data, &mut buffer, self.blocksize);
+        let data = fuse_slices(self.data, other.data);
+
+        self.data = buffer;
+        self.buffer = data;
+
+        merge.run()
     }
 }
 
@@ -54,4 +64,3 @@ pub fn fuse_slices<'a, 'b, 'c: 'a + 'b, T: 'c>(s1: &'a mut [T], s2: &'b mut [T])
         std::slice::from_raw_parts_mut(ptr1, s1.len() + s2.len())
     }
 }
-

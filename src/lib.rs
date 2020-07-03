@@ -102,7 +102,7 @@ where
             .pieces
             .last_mut()
             .unwrap()
-            .merge(other, adaptive_algorithms::task::NOTHING);
+            .merge(other);
     }
     assert!(mergesort.data.windows(2).all(|w| w[0] <= w[1]));
     // we need to check where the output landed, it's either in the original data or in the
@@ -163,24 +163,15 @@ where
                 // we can merge, remove last item
 
                 let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
-                // let mut tmp = vec![];
-                // std::mem::swap(&mut tmp, &mut self.pieces);
                 let a: &mut merge::MergeResult<'a, T> = &mut self.pieces.last_mut().unwrap();
                 // we want to be able to work on this element while also working on the merge at
                 // the same time. There should be a better that disabling the borrow checker here,
                 // but it works for now
-                // let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
+                let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
 
                 // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
-                // rayon::subgraph("merging", a.len() + b.len(), || {
-                a.merge(b, adaptive_algorithms::task::NOTHING);
-            // a.merge(b, Some(self));
-
-            // std::mem::swap(&mut tmp, &mut self.pieces);
-            // for elem in tmp {
-            //     self.pieces.push(elem);
-            //     self.merge();
-            // }
+                // a.merge(b, adaptive_algorithms::task::NOTHING);
+                a.merge_with(b, self);
             } else {
                 break; // nothing to do
             }
@@ -229,7 +220,8 @@ where
             if leftover + already_done >= total {
                 // we are currently sorting the remainder, this isn't really splittable anymore
                 // this is a very rare case
-                runner(&mut vec![self]);
+                // we just don't split here and continue like nothing happened...
+                //runner(&mut vec![self]);
                 return;
             }
             let right_to = cut_off_right(&mut self.to, total - leftover - already_done);
