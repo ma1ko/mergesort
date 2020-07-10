@@ -158,10 +158,7 @@ fn bench(c: &mut Criterion) {
     let mut tests: Vec<TestConfig<u32>> = vec![];
     let data = vec![&v_20 /*&v_21*/];
     for v in &data {
-        let test = Single::new(&v_20);
-        let x = TestConfig::new(v.len(), 1, None, test);
-        tests.push(x);
-        for i in &cpus {
+               for i in &cpus {
             for s in vec![0, 4, 6, 8] {
                 let test = MergeSort::new(&v);
                 let x = TestConfig::new(v.len(), *i, Some(s), test);
@@ -175,6 +172,10 @@ fn bench(c: &mut Criterion) {
             let x = TestConfig::new(v.len(), *i, None, test);
             tests.push(x);
         }
+ let test = Single::new(&v_20);
+        let x = TestConfig::new(v.len(), 1, None, test);
+        tests.push(x);
+
     }
 
     let mut t = Tester::new(tests, group, None);

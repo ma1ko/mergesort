@@ -48,7 +48,7 @@ where
         mut self: &mut Self,
         other: MergeResult<T>,
         other2: MergeResult<T>,
-        // f: &mut impl Task,
+        f: &mut impl Task,
     ) {
         let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut buffer = fuse_slices(buffer, other2.buffer);
@@ -65,7 +65,7 @@ where
         self.data = buffer;
         self.buffer = data;
 
-        merge.run()
+        merge.run_with(f)
     }
     pub fn merge(mut self: &mut Self, other: MergeResult<T>) {
         let mut buffer = fuse_slices(self.buffer, other.buffer);

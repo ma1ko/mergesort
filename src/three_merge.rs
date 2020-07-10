@@ -69,23 +69,23 @@ where
             let mut output: *mut T = self.output;
 
             // while left < left_work_end && right < right_work_end && middle < middle_work_end {
-            let mut to_copy;
+            // let mut to_copy;
             loop {
                 if *left <= *middle && *left <= *right {
-                    to_copy = get_and_increment(&mut left);
+                    let to_copy = get_and_increment(&mut left);
                     ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
                     if left == left_work_end {
                         break;
                     };
                 } else {
                     if *middle <= *right {
-                        to_copy = get_and_increment(&mut middle);
+                        let to_copy = get_and_increment(&mut middle);
                         ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
                         if middle == middle_work_end {
                             break;
                         };
                     } else {
-                        to_copy = get_and_increment(&mut right);
+                        let to_copy = get_and_increment(&mut right);
                         ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
                         if right == right_work_end {
                             break;

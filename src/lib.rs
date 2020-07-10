@@ -168,11 +168,11 @@ where
                 // we want to be able to work on this element while also working on the merge at
                 // the same time. There should be a better that disabling the borrow checker here,
                 // but it works for now
-                // let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
+                let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
 
                 // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
                 // a.merge(b, adaptive_algorithms::task::NOTHING);
-                a.merge_three(b, c);
+                a.merge_three(b, c, self);
             } else {
                 break; // nothing to do
             }
@@ -265,19 +265,15 @@ where
 
         let already_done = self.pieces_len().iter().sum::<usize>();
         let total = already_done + elem_left;
-        let powers_of_three = [243, 729, 2187, 6561, 19683, 59049, 177147];
+        let powers_of_three = [
+            243, 729, 2187, 6561, 19683, 59049, 177147, 531441, 1594323, 4782969,
+        ];
+
         let split = powers_of_three
             .iter()
-            .take_while(|&&x| x < total / 3 && x < elem_left)
+            .take_while(|&&x| x < elem_left)
             .last()
             .unwrap();
-        // println!(
-        //     "Total: {}, already_done: {}, split: {}, index: {}",
-        //     total,
-        //     already_done,
-        //     split,
-        //     total - split - already_done
-        // );
         let right_to = cut_off_right(&mut self.to, total - split - already_done);
         let right_data = cut_off_right(&mut self.data, total - split - already_done);
 
