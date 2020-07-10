@@ -73,25 +73,27 @@ where
             loop {
                 if *left <= *middle && *left <= *right {
                     to_copy = get_and_increment(&mut left);
+                    ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
                     if left == left_work_end {
                         break;
                     };
                 } else {
                     if *middle <= *right {
                         to_copy = get_and_increment(&mut middle);
+                        ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
                         if middle == middle_work_end {
                             break;
                         };
                     } else {
                         to_copy = get_and_increment(&mut right);
+                        ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
                         if right == right_work_end {
                             break;
                         };
                     }
                 };
-                ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             }
-            ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
+            // ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             self.left = left;
             self.middle = middle;
             self.right = right;
