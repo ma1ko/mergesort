@@ -3,8 +3,8 @@ extern crate lazy_static;
 pub mod merge;
 // pub mod rayon;
 mod slice_merge;
-mod three_merge;
 pub mod steal;
+mod three_merge;
 // pub mod task;
 use rand::prelude::*;
 
@@ -20,6 +20,7 @@ fn random_vec(size: usize) -> Vec<u64> {
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
     let mut v = random_vec(100000);
+    let mut v = random_vec(177147);
 
     let checksum: u64 = v.iter().cloned().sum();
     println!("Finished generating");
@@ -35,7 +36,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(not(feature = "logs"))]
     {
-        let pool = rayon::get_custom_thread_pool(1, 0);
+        let pool = rayon::get_custom_thread_pool(2, 0);
         let _ = pool.install(|| mergesort(&mut v));
     }
     assert_eq!(checksum, v.iter().sum::<u64>(), "failed merging");
@@ -74,7 +75,7 @@ where
         data,
         to: &mut tmp_slice,
         pieces: Vec::new(),
-        blocksize: 256,
+        blocksize: 243,
     };
     mergesort.run();
     // There might be many ordered non-sorted blocks left. That happens when we sort an input
@@ -83,6 +84,7 @@ where
         mergesort.pieces_len().windows(2).all(|w| w[0] >= w[1]),
         format!("{:?}", mergesort.pieces_len())
     );
+    // println!("{:?}", mergesort.pieces_len());
     // let's merge all the pieces from the back
     while mergesort.pieces.len() >= 2 {
         let mut other = mergesort.pieces.pop().unwrap();
@@ -99,11 +101,7 @@ where
                 std::mem::swap(&mut other.data, &mut other.buffer);
             }
         }
-        mergesort
-            .pieces
-            .last_mut()
-            .unwrap()
-            .merge(other);
+        mergesort.pieces.last_mut().unwrap().merge(other);
     }
     assert!(mergesort.data.windows(2).all(|w| w[0] <= w[1]));
     // we need to check where the output landed, it's either in the original data or in the
@@ -151,7 +149,7 @@ where
         // mostly for debugging
         self.pieces.iter().map(|x| x.len()).collect()
     }
-    fn merge(&mut self)
+    fn merge_three(&mut self)
     where
         T: Ord + Sync + Send + Copy,
     {
@@ -170,16 +168,68 @@ where
                 // we want to be able to work on this element while also working on the merge at
                 // the same time. There should be a better that disabling the borrow checker here,
                 // but it works for now
-                let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
+                // let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
 
                 // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
                 // a.merge(b, adaptive_algorithms::task::NOTHING);
-                a.merge_three(b, c, self);
+                a.merge_three(b, c);
             } else {
                 break; // nothing to do
             }
         }
     }
+    /*
+    fn merge(&mut self)
+      where
+          T: Ord + Sync + Send + Copy,
+      {
+          while self.pieces.len() >= 2 {
+              // to merge we need at least two parts, they need to be same size
+              let len = self.pieces.len();
+              let a = &self.pieces[len - 2];
+              let b = &self.pieces[len - 1];
+              if a.len() == b.len()  {
+                  // we can merge, remove last item
+
+                  let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
+                  let a: &mut merge::MergeResult<'a, T> = &mut self.pieces.last_mut().unwrap();
+                  // we want to be able to work on this element while also working on the merge at
+                  // the same time. There should be a better that disabling the borrow checker here,
+                  // but it works for now
+                  let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
+
+                  // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
+                  // a.merge(b, adaptive_algorithms::task::NOTHING);
+                  a.merge_with(b, self);
+              } else {
+                  break; // nothing to do
+              }
+          }
+      }
+      */
+    /*
+    fn force_merge(&mut self)
+       where
+           T: Ord + Sync + Send + Copy,
+       {
+           while self.pieces.len() >= 2 {
+               // to merge we need at least two parts, they need to be same size
+               let len = self.pieces.len();
+                   // we can merge, remove last item
+
+                   let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
+                   let a: &mut merge::MergeResult<'a, T> = &mut self.pieces.last_mut().unwrap();
+                   // we want to be able to work on this element while also working on the merge at
+                   // the same time. There should be a better that disabling the borrow checker here,
+                   // but it works for now
+                   // let a: &mut merge::MergeResult<'a, T> = unsafe { std::mem::transmute(a) };
+
+                   // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
+                   // a.merge(b, adaptive_algorithms::task::NOTHING);
+                   a.merge(b);
+           }
+       }
+     */
 }
 impl<'a, T> Task for Mergesort<'a, T>
 where
@@ -187,7 +237,7 @@ where
 {
     fn step(&mut self) {
         // this seems to be required after a split sometimes
-        self.merge();
+        self.merge_three();
 
         let elem_left = self.data.len();
         if elem_left == 0 {
@@ -202,7 +252,7 @@ where
         let merge = merge::MergeResult::new(piece, buffer);
         self.pieces.push(merge);
         // try merging pieces
-        self.merge();
+        self.merge_three();
 
         return;
     }
@@ -215,6 +265,34 @@ where
 
         let already_done = self.pieces_len().iter().sum::<usize>();
         let total = already_done + elem_left;
+        let powers_of_three = [243, 729, 2187, 6561, 19683, 59049, 177147];
+        let split = powers_of_three
+            .iter()
+            .take_while(|&&x| x < total / 3 && x < elem_left)
+            .last()
+            .unwrap();
+        // println!(
+        //     "Total: {}, already_done: {}, split: {}, index: {}",
+        //     total,
+        //     already_done,
+        //     split,
+        //     total - split - already_done
+        // );
+        let right_to = cut_off_right(&mut self.to, total - split - already_done);
+        let right_data = cut_off_right(&mut self.data, total - split - already_done);
+
+        // Other side
+        let mut other: Mergesort<'a, T> = Mergesort {
+            pieces: Vec::new(),
+            data: right_data,
+            to: right_to,
+            blocksize: self.blocksize,
+        };
+
+        runner(&mut vec![self, &mut other]);
+        return;
+
+        /*
         if total.next_power_of_two() != total {
             let leftover = total - (total.next_power_of_two() / 2);
             // Special case: we don't have a power of two elements: split off the remainder and
@@ -273,18 +351,22 @@ where
         //     other.data.len()
         // );
         runner(&mut vec![self, &mut other]);
+            */
     }
     fn can_split(&self) -> bool {
         return self.data.len() > self.blocksize * 32;
     }
     fn fuse(&mut self, other: &mut Self) {
-        self.merge();
+        self.merge_three();
         // for x in other.pieces.iter_mut() {
         //     self.pieces.push(x);
         //     self.merge();
         // }
+        assert!(other.pieces.len() == 1, format!("{:?}", other.pieces_len()));
+
         self.pieces.append(&mut other.pieces);
-        self.merge();
+
+        self.merge_three();
     }
     fn work(&self) -> Option<(&'static str, usize)> {
         Some(("Sorting", self.data.len()))

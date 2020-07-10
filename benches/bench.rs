@@ -141,7 +141,7 @@ fn bench(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
     let v_20: Vec<u32> = std::iter::repeat_with(rand::random)
-        .take(2usize.pow(20))
+        .take(3usize.pow(13))
         // .map(|x: u32| x % 1_000_000)
         .collect();
     // let v_21: Vec<u32> = std::iter::repeat_with(rand::random)

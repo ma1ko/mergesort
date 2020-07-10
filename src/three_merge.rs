@@ -1,7 +1,7 @@
+use crate::slice_merge::SliceMerge;
 use adaptive_algorithms::Task;
 use std::mem;
 use std::ptr;
-use crate::slice_merge::SliceMerge;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
 pub struct ThreeMerge<T>
@@ -25,7 +25,13 @@ impl<T> ThreeMerge<T>
 where
     T: Copy + Ord,
 {
-    pub fn new(left: &[T], middle: &[T], right: &[T], output: &mut [T], work_size: usize) -> ThreeMerge<T> {
+    pub fn new(
+        left: &[T],
+        middle: &[T],
+        right: &[T],
+        output: &mut [T],
+        work_size: usize,
+    ) -> ThreeMerge<T> {
         assert!(left.len() + right.len() + middle.len() == output.len());
         unsafe {
             return ThreeMerge {
@@ -51,6 +57,7 @@ where
     T: Copy + Ord + Sync + Send,
 {
     fn step(&mut self) {
+        // self.check();
         assert!(self.output as *const T != self.output_end);
         unsafe {
             let left_work_end = std::cmp::min(self.left_end, self.left.add(self.work_size));
@@ -60,53 +67,56 @@ where
             let mut middle: *const T = self.middle;
             let mut right: *const T = self.right;
             let mut output: *mut T = self.output;
-            while left < left_work_end && right < right_work_end && middle < middle_work_end{
-                let to_copy = if *left <= *middle{
-                    if *left <= *right{
-                    get_and_increment(&mut left)
+
+            while left < left_work_end && right < right_work_end && middle < middle_work_end {
+                let to_copy = if *left <= *middle {
+                    if *left <= *right {
+                        get_and_increment(&mut left)
                     } else {
-                    get_and_increment(&mut right)
+                        get_and_increment(&mut right)
                     }
                 } else {
-                    if *middle <= *right{
-                    get_and_increment(&mut middle)
-                    }
-                    else {
-                    get_and_increment(&mut right)
+                    if *middle <= *right {
+                        get_and_increment(&mut middle)
+                    } else {
+                        get_and_increment(&mut right)
                     }
                 };
                 ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             }
             self.left = left;
-            self.middle= middle;
+            self.middle = middle;
             self.right = right;
             self.output = output;
-            if self.left < self.left_end && self.right < self.right_end && self.middle < self.middle_end{
+            if self.left < self.left_end
+                && self.right < self.right_end
+                && self.middle < self.middle_end
+            {
                 // no side is finished yet
                 return;
             };
             // one side is finished, copy over the remainder from the other side
-            //
             let left = from_raw_parts(self.left, diff(self.left, self.left_end));
             let middle = from_raw_parts(self.middle, diff(self.middle, self.middle_end));
             let right = from_raw_parts(self.right, diff(self.right, self.right_end));
             let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
+            assert_eq!(left.len() + right.len() + middle.len(), output.len());
 
             if self.left == self.left_end {
-                SliceMerge::new(middle, right, output,self.work_size).run();
+                SliceMerge::new(middle, right, output, self.work_size).run();
             } else if self.middle == self.middle_end {
-                SliceMerge::new(left, right, output,self.work_size).run();
-
-            } else if self.right== self.right_end{
-                SliceMerge::new(left, middle, output,self.work_size).run();
+                SliceMerge::new(left, right, output, self.work_size).run();
+            } else if self.right == self.right_end {
+                SliceMerge::new(left, middle, output, self.work_size).run();
             }
             self.output = self.output_end as *mut T;
+            let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
             return;
 
-            // assert!(self.left < self.left_end || self.right < self.right_end);
-            ptr::copy_nonoverlapping(self.right, self.output, diff(self.right, self.right_end));
-            ptr::copy_nonoverlapping(self.left, self.output, diff(self.left, self.left_end));
-            self.output = self.output_end as *mut T;
+            // // assert!(self.left < self.left_end || self.right < self.right_end);
+            // ptr::copy_nonoverlapping(self.right, self.output, diff(self.right, self.right_end));
+            // ptr::copy_nonoverlapping(self.left, self.output, diff(self.left, self.left_end));
+            // self.output = self.output_end as *mut T;
 
             pub unsafe fn get_and_increment_mut<T>(ptr: &mut *mut T) -> *mut T {
                 let old = *ptr;
@@ -132,14 +142,17 @@ where
             let right = from_raw_parts(self.right, diff(self.right, self.right_end));
             let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
 
+            assert!(left.len() + right.len() + middle.len() == output.len());
+            assert!(output.len() > 100);
             // split on side at half (we might want to split the bigger side (?)
-            let (_, right_index) = split_for_merge(left, right, &|a, b| a < b);
-            let (left_index, middle_index) = split_for_merge(left, middle, &|a, b| a < b);
+            let (left_index, right_index) = split_for_merge(left, right, &|a, b| a < b);
+            let (left_index2, middle_index) = split_for_merge(left, middle, &|a, b| a < b);
+            assert_eq!(left_index, left_index2);
             let (left_left, left_right) = left.split_at(left_index);
 
             // split the right side at the same element than the left side
             let (right_left, right_right) = right.split_at(right_index);
-            let (middle_left, middle_right) = right.split_at(middle_index);
+            let (middle_left, middle_right) = middle.split_at(middle_index);
             let (output_left, output_right) =
                 output.split_at_mut(right_left.len() + left_left.len() + middle_left.len());
             // create another merging task will all right side slices.
@@ -160,6 +173,8 @@ where
             self.right_end = self.right.add(right_left.len());
             self.output_end = self.output.add(output_left.len());
             // println!("Parallel Merge: Left: , right: ",);
+            // self.check();
+            // other.check();
 
             runner(&mut vec![self, &mut other]);
         }
@@ -169,6 +184,19 @@ where
     }
     fn fuse(&mut self, _other: &mut Self) {
         // Nothing to do here actually
+    }
+}
+impl<T> ThreeMerge<T>
+where
+    T: Ord + Copy,
+{
+    fn check(&self) {
+        assert_eq!(
+            diff(self.left, self.left_end)
+                + diff(self.right, self.right_end)
+                + diff(self.middle, self.middle_end),
+            diff(self.output, self.output_end)
+        );
     }
 }
 
@@ -190,7 +218,7 @@ where
     let left_len = left.len();
     let right_len = right.len();
 
-    if left_len >= right_len {
+    // if left_len >= right_len {
         let left_mid = left_len / 2;
 
         // Find the first element in `right` that is greater than or equal to `left[left_mid]`.
@@ -206,6 +234,7 @@ where
         }
 
         (left_mid, a)
+            /*
     } else {
         let right_mid = right_len / 2;
 
@@ -223,4 +252,5 @@ where
 
         (a, right_mid)
     }
+           */ 
 }
