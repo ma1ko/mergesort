@@ -68,22 +68,30 @@ where
             let mut right: *const T = self.right;
             let mut output: *mut T = self.output;
 
-            while left < left_work_end && right < right_work_end && middle < middle_work_end {
-                let to_copy = if *left <= *middle {
-                    if *left <= *right {
-                        get_and_increment(&mut left)
-                    } else {
-                        get_and_increment(&mut right)
-                    }
+            // while left < left_work_end && right < right_work_end && middle < middle_work_end {
+            let mut to_copy;
+            loop {
+                if *left <= *middle && *left <= *right {
+                    to_copy = get_and_increment(&mut left);
+                    if left == left_work_end {
+                        break;
+                    };
                 } else {
                     if *middle <= *right {
-                        get_and_increment(&mut middle)
+                        to_copy = get_and_increment(&mut middle);
+                        if middle == middle_work_end {
+                            break;
+                        };
                     } else {
-                        get_and_increment(&mut right)
+                        to_copy = get_and_increment(&mut right);
+                        if right == right_work_end {
+                            break;
+                        };
                     }
                 };
                 ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             }
+            ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             self.left = left;
             self.middle = middle;
             self.right = right;
@@ -219,22 +227,22 @@ where
     let right_len = right.len();
 
     // if left_len >= right_len {
-        let left_mid = left_len / 2;
+    let left_mid = left_len / 2;
 
-        // Find the first element in `right` that is greater than or equal to `left[left_mid]`.
-        let mut a = 0;
-        let mut b = right_len;
-        while a < b {
-            let m = a + (b - a) / 2;
-            if is_less(&right[m], &left[left_mid]) {
-                a = m + 1;
-            } else {
-                b = m;
-            }
+    // Find the first element in `right` that is greater than or equal to `left[left_mid]`.
+    let mut a = 0;
+    let mut b = right_len;
+    while a < b {
+        let m = a + (b - a) / 2;
+        if is_less(&right[m], &left[left_mid]) {
+            a = m + 1;
+        } else {
+            b = m;
         }
+    }
 
-        (left_mid, a)
-            /*
+    (left_mid, a)
+    /*
     } else {
         let right_mid = right_len / 2;
 
@@ -252,5 +260,5 @@ where
 
         (a, right_mid)
     }
-           */ 
+           */
 }
