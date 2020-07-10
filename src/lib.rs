@@ -3,6 +3,7 @@ extern crate lazy_static;
 pub mod merge;
 // pub mod rayon;
 mod slice_merge;
+mod three_merge;
 pub mod steal;
 // pub mod task;
 use rand::prelude::*;
@@ -34,7 +35,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(not(feature = "logs"))]
     {
-        let pool = rayon::get_thread_pool();
+        let pool = rayon::get_custom_thread_pool(1, 0);
         let _ = pool.install(|| mergesort(&mut v));
     }
     assert_eq!(checksum, v.iter().sum::<u64>(), "failed merging");
@@ -79,7 +80,7 @@ where
     // There might be many ordered non-sorted blocks left. That happens when we sort an input
     // that's not a power of two elements.
     assert!(
-        mergesort.pieces_len().windows(2).all(|w| w[0] > w[1]),
+        mergesort.pieces_len().windows(2).all(|w| w[0] >= w[1]),
         format!("{:?}", mergesort.pieces_len())
     );
     // let's merge all the pieces from the back
@@ -154,14 +155,16 @@ where
     where
         T: Ord + Sync + Send + Copy,
     {
-        while self.pieces.len() >= 2 {
+        while self.pieces.len() >= 3 {
             // to merge we need at least two parts, they need to be same size
             let len = self.pieces.len();
-            let a = &self.pieces[len - 2];
-            let b = &self.pieces[len - 1];
-            if a.len() == b.len() {
+            let a = &self.pieces[len - 3];
+            let b = &self.pieces[len - 2];
+            let c = &self.pieces[len - 1];
+            if a.len() == b.len() && a.len() == c.len() {
                 // we can merge, remove last item
 
+                let c: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 let b: merge::MergeResult<'a, T> = self.pieces.pop().unwrap();
                 let a: &mut merge::MergeResult<'a, T> = &mut self.pieces.last_mut().unwrap();
                 // we want to be able to work on this element while also working on the merge at
@@ -171,7 +174,7 @@ where
 
                 // rayon::subgraph("merging", a.len() + b.len(), || a.merge(b, Some(self)));
                 // a.merge(b, adaptive_algorithms::task::NOTHING);
-                a.merge_with(b, self);
+                a.merge_three(b, c, self);
             } else {
                 break; // nothing to do
             }

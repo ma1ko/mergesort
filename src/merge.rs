@@ -44,6 +44,24 @@ where
 
         merge.run_with(f)
     }
+    pub fn merge_three(
+        mut self: &mut Self,
+        other: MergeResult<T>,
+        other2: MergeResult<T>,
+        f: &mut impl Task,
+    ) {
+        let mut buffer = fuse_slices(self.buffer, other.buffer);
+        let mut buffer = fuse_slices(buffer, other2.buffer);
+        let mut merge =
+            crate::three_merge::ThreeMerge::new(self.data, other.data, other2.data, &mut buffer, self.blocksize);
+        let data = fuse_slices(self.data, other.data);
+        let data = fuse_slices(data, other2.data);
+
+        self.data = buffer;
+        self.buffer = data;
+
+        merge.run_with(f)
+    }
     pub fn merge(mut self: &mut Self, other: MergeResult<T>) {
         let mut buffer = fuse_slices(self.buffer, other.buffer);
         let mut merge =
