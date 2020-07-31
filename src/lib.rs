@@ -20,7 +20,7 @@ fn random_vec(size: usize) -> Vec<u64> {
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running");
     let mut v = random_vec(100000);
-    let mut v = random_vec(177147);
+    let mut v = random_vec(3usize.pow(15));
 
     let checksum: u64 = v.iter().cloned().sum();
     println!("Finished generating");

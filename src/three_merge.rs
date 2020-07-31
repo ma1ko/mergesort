@@ -67,32 +67,52 @@ where
             let mut middle: *const T = self.middle;
             let mut right: *const T = self.right;
             let mut output: *mut T = self.output;
+            let mut left_ = *left;
+            let mut middle_ = *middle;
+            let mut right_ = *right;
 
             // while left < left_work_end && right < right_work_end && middle < middle_work_end {
             // let mut to_copy;
-            loop {
-                if *left <= *middle && *left <= *right {
-                    let to_copy = get_and_increment(&mut left);
-                    ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
-                    if left == left_work_end {
-                        break;
-                    };
-                } else {
-                    if *middle <= *right {
-                        let to_copy = get_and_increment(&mut middle);
-                        ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
-                        if middle == middle_work_end {
-                            break;
-                        };
-                    } else {
-                        let to_copy = get_and_increment(&mut right);
-                        ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
+            output = output.sub(1);
+
+            'outer: loop {
+                output = output.add(1);
+
+                if left_ <= middle_ {
+                    while right_ < left_ {
+                        *output = right_;
+                        right = right.add(1);
                         if right == right_work_end {
-                            break;
-                        };
+                            break 'outer;
+                        }
+                        output = output.add(1);
+                        right_ = *right;
                     }
-                };
+                    *output = left_;
+                    left = left.add(1);
+                    if left == left_work_end {
+                        break 'outer;
+                    }
+                    left_ = *left;
+                } else {
+                    while right_ <= middle_ {
+                        *output = right_;
+                        right = right.add(1);
+                        if right == right_work_end {
+                            break 'outer;
+                        }
+                        output = output.add(1);
+                        right_ = *right;
+                    }
+                    *output = middle_;
+                    middle = middle.add(1);
+                    if middle == middle_work_end {
+                        break 'outer;
+                    }
+                    middle_ = *middle;
+                }
             }
+            output = output.add(1);
             // ptr::copy_nonoverlapping(to_copy, get_and_increment_mut(&mut output), 1);
             self.left = left;
             self.middle = middle;
@@ -120,7 +140,6 @@ where
                 SliceMerge::new(left, middle, output, self.work_size).run();
             }
             self.output = self.output_end as *mut T;
-            let output = from_raw_parts_mut(self.output, diff(self.output, self.output_end));
             return;
 
             // // assert!(self.left < self.left_end || self.right < self.right_end);

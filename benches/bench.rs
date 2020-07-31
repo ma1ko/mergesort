@@ -36,6 +36,29 @@ extern crate rand;
 //     println!("generated comparison.html");
 // }
 
+#[derive(Default, Copy, Clone, Debug)]
+struct Tuple {
+    left: usize,
+    right: usize,
+}
+impl PartialEq for Tuple {
+    fn eq(&self, other: &Tuple) -> bool {
+        return self.left == other.left && self.right == other.right;
+    }
+}
+impl Eq for Tuple {}
+
+use std::cmp::Ordering;
+impl PartialOrd for Tuple {
+    fn partial_cmp(&self, other: &Tuple) -> Option<Ordering> {
+        self.left.partial_cmp(&other.left)
+    }
+}
+impl Ord for Tuple {
+    fn cmp(&self, other: &Tuple) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 struct MergeSort<'a, T> {
     original: &'a Vec<T>,
     data: Vec<T>,
@@ -46,7 +69,7 @@ impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for MergeSort<'a, T> {
         *self = MergeSort::new(self.original);
         rayon::join(|| {}, || {});
         mergesort(&mut self.data);
-        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        // assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
         None
     }
     fn name(&self) -> &'static str {
@@ -70,7 +93,7 @@ impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for RayonAdaptive<'a, T> 
     fn start(&mut self) -> Option<T> {
         *self = RayonAdaptive::new(self.original);
         adaptive_sort(&mut self.data);
-        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        // assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
         None
     }
     fn name(&self) -> &'static str {
@@ -95,7 +118,7 @@ impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for Rayon<'a, T> {
     fn start(&mut self) -> Option<T> {
         *self = Rayon::new(self.original);
         self.data.par_sort();
-        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        // assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
         None
     }
     fn name(&self) -> &'static str {
@@ -119,7 +142,7 @@ impl<'a, T: Send + Sync + Copy + Ord> Benchable<'a, T> for Single<'a, T> {
     fn start(&mut self) -> Option<T> {
         *self = Single::new(self.original);
         self.data.sort();
-        assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
+        // assert!(self.data.windows(2).all(|w| w[0] <= w[1]));
         None
     }
     fn name(&self) -> &'static str {
@@ -140,14 +163,23 @@ fn bench(c: &mut Criterion) {
     group.warm_up_time(std::time::Duration::new(0, 500));
     group.measurement_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
-    let v_20: Vec<u32> = std::iter::repeat_with(rand::random)
-        .take(3usize.pow(13))
-        // .map(|x: u32| x % 1_000_000)
-        .collect();
+    // let v_20: Vec<u32> = std::iter::repeat_with(rand::random)
+    //     .take(3usize.pow(13))
+    //     // .map(|x: u32| x % 1_000_000)
+    //     .collect();
     // let v_21: Vec<u32> = std::iter::repeat_with(rand::random)
     //     .take(2usize.pow(21))
     //     // .map(|x: u32| x % 1_000_000)
     //     .collect();
+
+    let v: Vec<Tuple> = std::iter::repeat_with(rand::random)
+        .take(3usize.pow(14))
+        .enumerate()
+        .map(|(x, y): (usize, usize)| Tuple {
+            left: y % 10,
+            right: x,
+        })
+        .collect();
 
     let cpus: Vec<usize> = vec![1, 2, 3, 4, 8, 16, 24, 32]
         .iter()
@@ -155,10 +187,14 @@ fn bench(c: &mut Criterion) {
         .cloned()
         .collect();
 
-    let mut tests: Vec<TestConfig<u32>> = vec![];
-    let data = vec![&v_20 /*&v_21*/];
+    let mut tests: Vec<TestConfig<_>> = vec![];
+
+    let data = vec![&v /*&v_21*/];
     for v in &data {
-               for i in &cpus {
+        let test = Single::new(&v);
+        let x = TestConfig::new(v.len(), 1, None, test);
+        tests.push(x);
+        for i in &cpus {
             for s in vec![0, 4, 6, 8] {
                 let test = MergeSort::new(&v);
                 let x = TestConfig::new(v.len(), *i, Some(s), test);
@@ -172,10 +208,6 @@ fn bench(c: &mut Criterion) {
             let x = TestConfig::new(v.len(), *i, None, test);
             tests.push(x);
         }
- let test = Single::new(&v_20);
-        let x = TestConfig::new(v.len(), 1, None, test);
-        tests.push(x);
-
     }
 
     let mut t = Tester::new(tests, group, None);

@@ -8,6 +8,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         v
     }
     let mut v = random_vec(1000000);
+    let mut v = random_vec(3usize.pow(14));
 
     let checksum: u64 = v.iter().cloned().sum();
     println!("Finished generating");
