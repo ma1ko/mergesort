@@ -2,7 +2,7 @@ use crate::slice_merge;
 pub use adaptive_algorithms::Task;
 // use std::sync::atomic::AtomicUsize;
 
-const BLOCKSIZE: usize = 1024;
+const BLOCKSIZE: usize = 81;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct MergeResult<'a, T>

@@ -75,7 +75,7 @@ where
         data,
         to: &mut tmp_slice,
         pieces: Vec::new(),
-        blocksize: 243,
+        blocksize: 81,
     };
     mergesort.run();
     // There might be many ordered non-sorted blocks left. That happens when we sort an input

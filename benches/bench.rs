@@ -51,7 +51,15 @@ impl Eq for Tuple {}
 use std::cmp::Ordering;
 impl PartialOrd for Tuple {
     fn partial_cmp(&self, other: &Tuple) -> Option<Ordering> {
-        self.left.partial_cmp(&other.left)
+        // self.left.partial_cmp(&other.left)
+        self.dist().partial_cmp(&other.dist())
+    }
+}
+
+impl Tuple {
+    fn dist(&self) -> f64 {
+        let squared = self.left * self.left + self.right * self.right;
+        (squared as f64).sqrt()
     }
 }
 impl Ord for Tuple {
@@ -160,7 +168,7 @@ impl<'a, T: Clone> Single<'a, T> {
 
 fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("MergeSorting");
-    group.warm_up_time(std::time::Duration::new(0, 500));
+    group.warm_up_time(std::time::Duration::new(1, 0));
     group.measurement_time(std::time::Duration::new(1, 0));
     group.sample_size(10);
     // let v_20: Vec<u32> = std::iter::repeat_with(rand::random)
@@ -173,12 +181,9 @@ fn bench(c: &mut Criterion) {
     //     .collect();
 
     let v: Vec<Tuple> = std::iter::repeat_with(rand::random)
-        .take(3usize.pow(14))
+        .take(3usize.pow(12))
         .enumerate()
-        .map(|(x, y): (usize, usize)| Tuple {
-            left: y % 10,
-            right: x,
-        })
+        .map(|(x, y): (usize, usize)| Tuple { left: y, right: x })
         .collect();
 
     let cpus: Vec<usize> = vec![1, 2, 3, 4, 8, 16, 24, 32]
